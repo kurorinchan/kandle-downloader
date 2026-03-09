@@ -1,39 +1,45 @@
-// ==UserScript==
-// @name         Kindle Manga Downloader
-// @namespace    http://tampermonkey.net/
-// @version      0.1.0
-// @description  Download manga images from Amazon Kindle
-// @author       You
-// @match        https://read.amazon.co.jp/*
-// @match        https://read.amazon.com/*
-// @require      https://cdn.jsdelivr.net/npm/js-untar@2.0.0/build/dist/untar.min.js
-// @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.9.1/jszip.min.js
-// @grant        GM_download
-// @grant        GM_xmlhttpRequest
-// @connect      cloudfront.net
-// @run-at       document-end
-// ==/UserScript==
+//==UserScript==
+//@name         Kindle Manga Downloader
+//@namespace    http://tampermonkey.net/
+//@version      0.1.0
+//@description  Download manga images from Amazon Kindle
+//@author       You
+//@match        https://read.amazon.co.jp/*
+//@match        https://read.amazon.com/*
+//@require      https://cdn.jsdelivr.net/npm/js-untar@2.0.0/build/dist/untar.min.js
+//@require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.9.1/jszip.min.js
+//@grant        GM_download
+//@grant        GM_xmlhttpRequest
+//@connect      cloudfront.net
+//@run-at       document-end
+//==/UserScript==
 
 (function () {
 	"use strict";
 
-	// ===== DEBUG MODE CONFIGURATION =====
-	const DEBUG_MODE = true; // Set to false for full download
-	const DEBUG_MAX_PAGE_REQUESTS = 3; // Only download first N page requests (each request = 2 pages)
-	const DEBUG_MAX_IMAGES = 10; // Only download first N images
-	// ====================================
+	//===== DEBUG MODE CONFIGURATION =====
+	const DEBUG_MODE = false; //Set to false for full download
+	const DEBUG_MAX_PAGE_REQUESTS = 3; //Only download first N page requests (each request = 2 pages)
+	const DEBUG_MAX_IMAGES = 10; //Only download first N images
+	//====================================
 
 	console.log("Kindle Manga Downloader loaded");
 	if (DEBUG_MODE) {
 		console.log(`🐛 DEBUG MODE ENABLED: Max ${DEBUG_MAX_PAGE_REQUESTS} page requests, Max ${DEBUG_MAX_IMAGES} images`);
 	}
 
-	// ===== UI MODAL SYSTEM =====
 	let currentModal = null;
+	let cachedBookInfo = null;
 
-	// Create modal styles
+	/**
+	 * Inject the CSS styles into the page.
+	 *
+	 * @returns {void}
+	 */
 	function injectModalStyles() {
-		if (document.getElementById("kindle-dl-styles")) return;
+		if (document.getElementById("kindle-dl-styles")) {
+			return;
+		}
 
 		const style = document.createElement("style");
 		style.id = "kindle-dl-styles";
@@ -195,10 +201,17 @@
 		document.head.appendChild(style);
 	}
 
-	// Show modal with message
+	/**
+	 * Show a modal with a title, content, and optional buttons.
+	 *
+	 * @param {string} title The title of the modal.
+	 * @param {string|HTMLElement} content The content of the modal.
+	 * @param {Array} buttons An array of button objects with text, type, and onClick properties.
+	 * @returns {HTMLElement} The overlay element of the modal.
+	 */
 	function showModal(title, content, buttons = []) {
 		injectModalStyles();
-		closeModal(); // Close any existing modal
+		closeModal(); //Close any existing modal
 
 		const overlay = document.createElement("div");
 		overlay.className = "kindle-modal-overlay";
@@ -245,7 +258,13 @@
 		return overlay;
 	}
 
-	// Show confirmation modal
+	/**
+	 * Show a confirmation modal with a title and content.
+	 *
+	 * @param {string} title The title of the confirmation modal.
+	 * @param {string|HTMLElement} content The content of the confirmation modal.
+	 * @returns {Promise<boolean>} A promise that resolves to true if the user confirms, false otherwise.
+	 */
 	function showConfirm(title, content) {
 		return new Promise((resolve) => {
 			showModal(title, content, [
@@ -255,7 +274,12 @@
 		});
 	}
 
-	// Create progress modal
+	/**
+	 * Create a progress modal with a title.
+	 *
+	 * @param {string} title The title of the progress modal.
+	 * @returns {Object} An object containing the overlay element, content element, and methods to update progress and add status messages.
+	 */
 	function createProgressModal(title) {
 		injectModalStyles();
 		closeModal();
@@ -280,16 +304,16 @@
 		document.body.appendChild(overlay);
 		currentModal = overlay;
 
-		// Helper to normalize step name to consistent ID
+		//Helper to normalize step name to consistent ID
 		const normalizeStepId = (step) => {
 			return step
-				.replace(/[^\w\s]/g, "") // Remove emoji and special chars
+				.replace(/[^\w\s]/g, "") //Remove emoji and special chars
 				.trim()
 				.toLowerCase()
-				.replace(/\s+/g, "-"); // Replace spaces with hyphens
+				.replace(/\s+/g, "-"); //Replace spaces with hyphens
 		};
 
-		// Helper to limit status messages (keep only last N items)
+		//Helper to limit status messages (keep only last N items)
 		const limitStatusMessages = (statusList, maxItems = 20) => {
 			while (statusList.children.length > maxItems) {
 				statusList.removeChild(statusList.firstChild);
@@ -319,9 +343,11 @@
 					contentEl.appendChild(section);
 				}
 
-				// Update label in case step text changed (emoji variations)
+				//Update label in case step text changed (emoji variations)
 				const label = section.querySelector(".kindle-progress-label");
-				if (label) label.textContent = step;
+				if (label) {
+					label.textContent = step;
+				}
 
 				const fill = section.querySelector(".kindle-progress-fill");
 				const text = section.querySelector(".kindle-progress-text");
@@ -332,16 +358,16 @@
 					const statusList = section.querySelector(".kindle-status-list");
 					const item = document.createElement("div");
 					item.className = "kindle-status-item";
-					if (statusMessage.startsWith("✓") || statusMessage.startsWith("✅")) {
+					if (statusMessage.startsWith("[OKAY] ")) {
 						item.className += " success";
-					} else if (statusMessage.startsWith("❌") || statusMessage.startsWith("Error")) {
+					} else if (statusMessage.startsWith("[ERROR] ")) {
 						item.className += " error";
-					} else if (statusMessage.startsWith("⚠️")) {
+					} else if (statusMessage.startsWith("[WARNING] ")) {
 						item.className += " warning";
 					}
 					item.textContent = statusMessage;
 					statusList.appendChild(item);
-					limitStatusMessages(statusList, 15); // Keep only last 15 messages
+					limitStatusMessages(statusList, 15); //Keep only last 15 messages
 					statusList.scrollTop = statusList.scrollHeight;
 				}
 			},
@@ -359,14 +385,16 @@
 				item.className = `kindle-status-item ${type}`;
 				item.textContent = message;
 				statusContainer.appendChild(item);
-				limitStatusMessages(statusContainer, 15); // Keep only last 15 messages
+				limitStatusMessages(statusContainer, 15); //Keep only last 15 messages
 				statusContainer.scrollTop = statusContainer.scrollHeight;
 			},
 			close: closeModal,
 		};
 	}
 
-	// Close current modal
+	/**
+	 * Close the currently open modal.
+	 */
 	function closeModal() {
 		if (currentModal) {
 			currentModal.remove();
@@ -407,10 +435,12 @@
 	 * - CDN auth parameters (expire after ~5 minutes)
 	 */
 
-	// Add download button to the page
+	/**
+	 * Add a "Download Book" button to the page in the top right.
+	 */
 	function addDownloadButton() {
 		const button = document.createElement("button");
-		button.textContent = "📥 Download Manga";
+		button.textContent = "Download Book";
 		button.style.cssText = `
 			position: fixed;
 			top: 10px;
@@ -426,10 +456,10 @@
 			font-weight: bold;
 			box-shadow: 0 2px 5px rgba(0,0,0,0.3);
 		`;
-		button.addEventListener("click", downloadManga);
+		button.addEventListener("click", downloadBook);
 		document.body.appendChild(button);
 
-		// Also add a status check button for debugging
+		//Also add a status check button for debugging
 		const statusButton = document.createElement("button");
 		statusButton.textContent = "🔍 Check Status";
 		statusButton.style.cssText = `
@@ -451,7 +481,9 @@
 		document.body.appendChild(statusButton);
 	}
 
-	// Check status of all required data
+	/**
+	 * Check the status of all required data for downloading the book and display a comprehensive report in a modal.
+	 */
 	function checkStatus() {
 		console.log("=== Kindle Downloader Status Check ===");
 
@@ -463,7 +495,7 @@
 		let status = "";
 
 		if (bookInfo) {
-			status += `✅ Book Info: Found\n`;
+			status += `[OKAY] Book Info: Found\n`;
 			status += `   Title: ${bookInfo.title || "N/A"}\n`;
 			status += `   ASIN: ${bookInfo.asin || "N/A"}\n`;
 			status += `   Revision: ${bookInfo.contentGuid || "N/A"}\n`;
@@ -471,19 +503,19 @@
 			if (bookInfo.karamelToken) {
 				const expiresAt = new Date(bookInfo.karamelToken.expiresAt);
 				const isExpired = Date.now() > bookInfo.karamelToken.expiresAt;
-				status += `   Token: ${isExpired ? "⚠️ EXPIRED" : "✅ Valid"}\n`;
+				status += `   Token: ${isExpired ? "[WARNING] EXPIRED" : "[OKAY] Valid"}\n`;
 				status += `   Expires: ${expiresAt.toLocaleString()}\n`;
 			}
 		} else {
-			status += `❌ Book Info: Not Found\n`;
+			status += `[ERROR] Book Info: Not Found\n`;
 		}
 
-		status += `\n${asin ? "✅" : "❌"} ASIN: ${asin || "Not found"}\n`;
-		status += `${revision ? "✅" : "❌"} Revision: ${revision || "Not found"}\n`;
-		status += `${token ? "✅" : "❌"} Rendering Token: ${token ? "Found (" + token.substring(0, 20) + "...)" : "Not found"}\n`;
+		status += `\n${asin ? "[OKAY] " : "[ERROR] "} ASIN: ${asin || "Not found"}\n`;
+		status += `${revision ? "[OKAY] " : "[ERROR] "} Revision: ${revision || "Not found"}\n`;
+		status += `${token ? "[OKAY] " : "[ERROR] "} Rendering Token: ${token ? "Found (" + token.substring(0, 20) + "...)" : "Not found"}\n`;
 
 		const allReady = bookInfo && asin && revision && token;
-		status += `\n${allReady ? "🎉 Ready to download!" : "⚠️ Missing required data"}`;
+		status += `\n${allReady ? "🎉 Ready to download!" : "[WARNING] Missing required data"}`;
 
 		showModal("📊 Status Report", status, [{ text: "Close", type: "primary" }]);
 		console.log(status);
@@ -493,19 +525,26 @@
 		}
 	}
 
-	// Parse TAR response
+	/**
+	 * Parse a TAR response and extract JSON files.
+	 * This function uses the js-untar library to parse the TAR file and extracts JSON content from the files.
+	 * It skips any PaxHeaders (metadata files) and returns a map of file names to their parsed JSON content.
+	 *
+	 * @param {ArrayBuffer} arrayBuffer The TAR response as an ArrayBuffer.
+	 * @returns {Promise<Object>} A map of file names to parsed JSON objects.
+	 */
 	async function parseTarResponse(arrayBuffer) {
 		try {
 			const files = await untar(arrayBuffer);
 			const fileMap = {};
 
 			for (const file of files) {
-				// Skip PaxHeaders (metadata files)
+				//Skip PaxHeaders (metadata files)
 				if (file.name.includes("PaxHeaders")) {
 					continue;
 				}
 
-				// Convert file blob to text for JSON files
+				//Convert file blob to text for JSON files
 				const text = await file.blob.text();
 				fileMap[file.name] = JSON.parse(text);
 				console.log(`Parsed: ${file.name}`);
@@ -518,7 +557,17 @@
 		}
 	}
 
-	// Fetch pages from render endpoint
+	/**
+	 * Fetch pages from the render endpoint.
+	 *
+	 * @param {string} asin The ASIN of the book.
+	 * @param {string} revision The revision of the book.
+	 * @param {string} renderingToken The rendering token for authentication.
+	 * @param {number} startingPosition The starting position for fetching pages.
+	 * @param {number} numPages The number of pages to fetch.
+	 * @param {boolean} includeLocationMap Whether to include the location map.
+	 * @returns {Promise<ArrayBuffer>} The fetched page data as an ArrayBuffer.
+	 */
 	async function fetchPages(asin, revision, renderingToken, startingPosition, numPages = 2, includeLocationMap = false) {
 		const params = new URLSearchParams({
 			version: "3.0",
@@ -545,7 +594,7 @@
 			bundleImages: "false",
 		});
 
-		// Only include locationMap when fetching TOC
+		//Only include locationMap when fetching TOC
 		if (includeLocationMap) {
 			params.set("locationMap", "true");
 		}
@@ -568,32 +617,36 @@
 		return await response.arrayBuffer();
 	}
 
-	// Download manga from render endpoint
-	async function downloadManga() {
+	/**
+	 * Download the book by fetching pages, parsing them, and queueing images for download.
+	 *
+	 * @returns {Promise<void>}
+	 */
+	async function downloadBook() {
 		let progressModal = null;
 		try {
-			console.log("🚀 Starting manga download...");
+			console.log("🚀 Starting book download...");
 
 			const renderingToken = extractRenderingToken();
 			if (!renderingToken) {
-				showModal("❌ Error", "Could not find rendering token. Make sure the reader is loaded.", [{ text: "OK", type: "primary" }]);
+				showModal("[ERROR]", "Could not find rendering token. Make sure the reader is loaded.", [{ text: "OK", type: "primary" }]);
 				return;
 			}
 
 			const revision = extractRevision();
 			if (!revision) {
-				showModal("❌ Error", "Could not find book revision. Make sure the reader is loaded.", [{ text: "OK", type: "primary" }]);
+				showModal("[ERROR]", "Could not find book revision. Make sure the reader is loaded.", [{ text: "OK", type: "primary" }]);
 				return;
 			}
 
-			// Extract ASIN from current page
+			//Extract ASIN from current page
 			const asin = extractAsinFromPage();
 			if (!asin) {
-				showModal("❌ Error", "Could not find book ASIN. Make sure you are on a book page.", [{ text: "OK", type: "primary" }]);
+				showModal("[ERROR]", "Could not find book ASIN. Make sure you are on a book page.", [{ text: "OK", type: "primary" }]);
 				return;
 			}
 
-			// Step 1: Fetch TOC and metadata to understand book structure
+			//Step 1: Fetch TOC and metadata to understand book structure
 			console.log("📖 Step 1: Fetching Table of Contents...");
 			progressModal = createProgressModal("📥 Downloading Manga");
 			progressModal.addStatus("📖 Fetching Table of Contents...", "info");
@@ -606,7 +659,7 @@
 			const locationMap = tocFiles["location_map.json"];
 			const initialManifest = tocFiles["manifest.json"];
 
-			progressModal.addStatus("✅ Table of Contents loaded", "success");
+			progressModal.addStatus("[OKAY] Table of Contents loaded", "success");
 			console.log("📚 Book Info:");
 			console.log("  Title:", metadata.bookTitle);
 			console.log("  Authors:", metadata.authors);
@@ -617,7 +670,7 @@
 				console.log(`    - ${chapter.label} (position ${chapter.tocPositionId})`);
 			});
 
-			// Step 2: Calculate how many requests we need
+			//Step 2: Calculate how many requests we need
 			const totalLocations = locationMap.locations.length;
 			const pagesPerRequest = 2;
 			const estimatedRequests = Math.ceil(totalLocations / pagesPerRequest);
@@ -644,20 +697,20 @@
 
 			progressModal = createProgressModal("📥 Downloading Manga");
 
-			// Step 3: Download all pages
+			//Step 3: Download all pages
 			console.log("\n📥 Step 2: Downloading all pages...");
 			const allPageData = [];
 			const allCdnResources = new Map();
 			let latestManifest = initialManifest;
 
-			// Collect resources from initial manifest
+			//Collect resources from initial manifest
 			if (initialManifest && initialManifest.cdnResources) {
 				initialManifest.cdnResources.forEach((resource) => {
 					allCdnResources.set(resource.url, resource);
 				});
 			}
 
-			// We already have the first batch from the TOC request
+			//We already have the first batch from the TOC request
 			if (tocFiles["page_data_0_1.json"]) {
 				allPageData.push(...tocFiles["page_data_0_1.json"]);
 				progressModal.updateProgress("📄 Downloading Pages", 1, estimatedRequests, "✓ Pages 0-1 downloaded");
@@ -666,7 +719,7 @@
 
 			console.log(`Starting loop from position index 2 to ${totalLocations}, stepping by ${pagesPerRequest}...`);
 
-			// Download remaining pages using location map positions
+			//Download remaining pages using location map positions
 			let requestCount = 1;
 			const maxRequests = DEBUG_MODE ? DEBUG_MAX_PAGE_REQUESTS : totalLocations;
 
@@ -683,7 +736,7 @@
 					const pageBuffer = await fetchPages(asin, revision, renderingToken, startPos, pagesPerRequest);
 					const pageFiles = await parseTarResponse(pageBuffer);
 
-					// Find the page_data file
+					//Find the page_data file
 					const pageDataFile = Object.keys(pageFiles).find((name) => name.startsWith("page_data_"));
 					if (pageDataFile && pageFiles[pageDataFile]) {
 						const pagesAdded = pageFiles[pageDataFile].length;
@@ -702,7 +755,7 @@
 						console.warn(`  No page_data file found for position ${startPos}`);
 					}
 
-					// Update manifest if available
+					//Update manifest if available
 					if (pageFiles["manifest.json"]) {
 						latestManifest = pageFiles["manifest.json"];
 						if (latestManifest.cdnResources) {
@@ -714,17 +767,17 @@
 
 					await new Promise((resolve) => setTimeout(resolve, 100));
 				} catch (error) {
-					progressModal.addStatus(`❌ Failed at position ${startPos}`, "error");
-					console.error(`❌ Failed to download pages at position ${startPos}:`, error);
+					progressModal.addStatus(`[ERROR] Failed at position ${startPos}`, "error");
+					console.error(`[ERROR] Failed to download pages at position ${startPos}:`, error);
 				}
 			}
 
-			progressModal.addStatus(`✅ Downloaded ${allPageData.length} total pages`, "success");
-			console.log(`\n✅ Loop complete. Downloaded all page data: ${allPageData.length} pages total`);
+			progressModal.addStatus(`[OKAY] Downloaded ${allPageData.length} total pages`, "success");
+			console.log(`\n[OKAY] Loop complete. Downloaded all page data: ${allPageData.length} pages total`);
 			console.log(`Collected ${allCdnResources.size} unique CDN resources`);
 
-			// Step 4: Download images from CDN
-			console.log("\n🖼️  Step 3: Downloading images from CDN...");
+			//Step 4: Download images from CDN
+			console.log("\n🖼️ Step 3: Downloading images from CDN...");
 			const bookInfo = getBookInfo();
 
 			const mergedManifest = {
@@ -736,11 +789,22 @@
 		} catch (error) {
 			if (progressModal) progressModal.close();
 			console.error("Download failed:", error);
-			showModal("❌ Download Failed", `Error: ${error.message}`, [{ text: "OK", type: "primary" }]);
+			showModal("[ERROR] Download Failed", `Error: ${error.message}`, [{ text: "OK", type: "primary" }]);
 		}
 	}
 
-	// Download images from CDN
+	/**
+	 * Download images from the CDN based on the manifest and page data.
+	 * This function extracts image references from the page data, maps them to CDN URLs using the manifest,
+	 * and downloads each image while updating the progress modal.
+	 *
+	 * @param {Object} manifest The manifest containing CDN resources and authentication info.
+	 * @param {Array} pageData The array of page data objects.
+	 * @param {Object} metadata The metadata of the book.
+	 * @param {Object} karamelToken The Karamel token for authentication.
+	 * @param {Object} progressModal The progress modal for updating download status.
+	 * @returns {Promise<void>}
+	 */
 	async function downloadImages(manifest, pageData, metadata, karamelToken, progressModal) {
 		if (!manifest || !manifest.cdnResources || !manifest.cdn) {
 			console.error("Invalid manifest data");
@@ -750,7 +814,7 @@
 		const { baseUrl, authParameter } = manifest.cdn;
 		const resourceMap = {};
 
-		// Create a map of resource references to URLs
+		//Create a map of resource references to URLs
 		manifest.cdnResources.forEach((resource) => {
 			const resourceId = resource.url.split("/")[1];
 			resourceMap[resource.url] = {
@@ -761,7 +825,7 @@
 
 		console.log("Resource Map:", resourceMap);
 
-		// Extract image references from page data
+		//Extract image references from page data
 		const imageUrls = [];
 		pageData.forEach((page) => {
 			if (page.children) {
@@ -769,10 +833,10 @@
 					if (child.imageReference) {
 						const resource = resourceMap[child.imageReference];
 						if (resource) {
-							// Build full URL with auth parameters from manifest AND karamel token
+							//Build full URL with auth parameters from manifest AND karamel token
 							let imageUrl = `${resource.url}?${authParameter}`;
 
-							// Add token and expiration from karamelToken
+							//Add token and expiration from karamelToken
 							if (karamelToken && karamelToken.token) {
 								imageUrl += `&token=${encodeURIComponent(karamelToken.token)}`;
 							}
@@ -804,7 +868,7 @@
 			console.log(`🐛 DEBUG MODE: Downloading only first ${maxImages} of ${imageUrls.length} images`);
 		}
 
-		// Download each image
+		//Download each image
 		for (let i = 0; i < maxImages; i++) {
 			const { pageIndex, url, elementId, resourceType } = imageUrls[i];
 
@@ -815,7 +879,7 @@
 				});
 
 				if (!imgResponse.ok) {
-					progressModal.addStatus(`❌ Image ${i + 1} failed: ${imgResponse.status}`, "error");
+					progressModal.addStatus(`[ERROR] Image ${i + 1} failed: ${imgResponse.status}`, "error");
 					console.error(`Failed to download image ${i + 1}: ${imgResponse.status}`);
 					continue;
 				}
@@ -823,7 +887,7 @@
 				const blob = await imgResponse.blob();
 				const arrayBuffer = await blob.arrayBuffer();
 
-				// Debug logging for first image only
+				//Debug logging for first image only
 				if (i === 0) {
 					console.log(`\n=== DEBUG: Image ${i + 1} ===`);
 					console.log(`Resource type: ${resourceType || "unknown"}`);
@@ -847,31 +911,31 @@
 					}
 
 					if (imageFormat === "unknown") {
-						progressModal.addStatus(`❌ Image ${i + 1} unknown format`, "error");
-						console.error(`❌ Image ${i + 1} decryption produced unknown format`);
+						progressModal.addStatus(`[ERROR] Image ${i + 1} unknown format`, "error");
+						console.error(`[ERROR] Image ${i + 1} decryption produced unknown format`);
 						logBytes(finalData, `  Unknown format bytes (image ${i + 1})`);
 						continue;
 					}
 				} catch (decryptError) {
-					progressModal.addStatus(`❌ Decryption failed for image ${i + 1}`, "error");
-					console.error(`❌ Failed to decrypt image ${i + 1}:`, decryptError);
+					progressModal.addStatus(`[ERROR] Decryption failed for image ${i + 1}`, "error");
+					console.error(`[ERROR] Failed to decrypt image ${i + 1}:`, decryptError);
 					continue;
 				}
 
 				const filename = `page_${String(pageIndex).padStart(3, "0")}_${elementId}.${imageFormat}`;
 				zip.file(filename, finalData);
 
-				// Update progress
+				//Update progress
 				progressModal.updateProgress("🖼️  Downloading Images", i + 1, maxImages, (i + 1) % 10 === 0 ? `✓ ${filename} (${(finalData.byteLength / 1024).toFixed(1)} KB)` : null);
 
 				console.log(`✓ Downloaded: ${filename}`);
 			} catch (error) {
-				progressModal.addStatus(`❌ Error on image ${i + 1}`, "error");
+				progressModal.addStatus(`[ERROR] Error on image ${i + 1}`, "error");
 				console.error(`Error downloading image ${i + 1}:`, error);
 			}
 		}
 
-		// Generate and download ZIP
+		//Generate and download ZIP
 		const fileCount = Object.keys(zip.files).length;
 		progressModal.addStatus(`📦 Creating ZIP with ${fileCount} files...`, "info");
 		console.log(`📦 Creating ZIP file with ${fileCount} files...`);
@@ -891,8 +955,8 @@
 				},
 			);
 
-			progressModal.addStatus(`✅ ZIP created: ${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`, "success");
-			console.log(`✅ ZIP file created: ${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`);
+			progressModal.addStatus(`[OKAY] ZIP created: ${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`, "success");
+			console.log(`[OKAY] ZIP file created: ${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`);
 
 			const zipUrl = URL.createObjectURL(zipBlob);
 			const a = document.createElement("a");
@@ -904,26 +968,33 @@
 			URL.revokeObjectURL(zipUrl);
 
 			progressModal.addStatus(`🎉 Download complete!`, "success");
-			console.log("✓ Download complete!");
+			console.log("[OKAY] Download complete!");
 
 			setTimeout(() => {
 				progressModal.close();
-				showModal("✅ Download Complete", `Successfully downloaded ${fileCount} images!\nFile: ${sanitizeFilename(bookTitle)}.zip`, [{ text: "OK", type: "primary" }]);
+				showModal("[OKAY] Download Complete", `Successfully downloaded ${fileCount} images!\nFile: ${sanitizeFilename(bookTitle)}.zip`, [{ text: "OK", type: "primary" }]);
 			}, 2000);
 		} catch (zipError) {
-			progressModal.addStatus(`❌ ZIP generation failed`, "error");
-			console.error("❌ ZIP generation failed:", zipError);
+			progressModal.addStatus(`[ERROR] ZIP generation failed`, "error");
+			console.error("[ERROR] ZIP generation failed:", zipError);
 			progressModal.close();
-			showModal("❌ ZIP Generation Failed", `Error: ${zipError.message}`, [{ text: "OK", type: "primary" }]);
+			showModal("[ERROR] ZIP Generation Failed", `Error: ${zipError.message}`, [{ text: "OK", type: "primary" }]);
 			throw zipError;
 		}
 	}
 
-	// Decrypt encrypted image using AES-GCM
+	/**
+	 * Decrypt encrypted image using AES-GCM.
+	 *
+	 * @param {ArrayBuffer} encryptedArrayBuffer - The encrypted image data.
+	 * @param {Object} karamelToken - The Karamel token containing the key and expiration.
+	 * @returns {Promise<ArrayBuffer>} The decrypted image data.
+	 * @throws Will throw an error if decryption fails or if the token is invalid.
+	 */
 	async function decryptImage(encryptedArrayBuffer, karamelToken) {
 		try {
-			// Step 1: Extract 40-character key from token
-			// Key location = token.substring(expiresAt % 60, (expiresAt % 60) + 40)
+			//Step 1: Extract 40-character key from token
+			//Key location = token.substring(expiresAt % 60, (expiresAt % 60) + 40)
 			if (!karamelToken || !karamelToken.token || !karamelToken.expiresAt) {
 				throw new Error("Invalid karamel token for decryption");
 			}
@@ -935,8 +1006,8 @@
 			const offset = karamelToken.expiresAt % 60;
 			const keyString = karamelToken.token.substring(offset, offset + 40);
 
-			// Step 2: Parse encrypted data structure
-			// Format: [salt(24 base64)][IV(24 base64)][encrypted data(rest, base64)]
+			//Step 2: Parse encrypted data structure
+			//Format: [salt(24 base64)][IV(24 base64)][encrypted data(rest, base64)]
 			const decoder = new TextDecoder("utf-8");
 			const encodedText = decoder.decode(encryptedArrayBuffer);
 
@@ -944,16 +1015,16 @@
 			const ivB64 = encodedText.substring(24, 48);
 			const encryptedDataB64 = encodedText.substring(48);
 
-			// Step 3: Decode base64 components
+			//Step 3: Decode base64 components
 			const salt = base64ToArrayBuffer(saltB64);
 			const iv = base64ToArrayBuffer(ivB64);
 			const encryptedData = base64ToArrayBuffer(encryptedDataB64);
 
-			// Step 4: Import raw key for PBKDF2
+			//Step 4: Import raw key for PBKDF2
 			const encoder = new TextEncoder();
 			const rawKey = await window.crypto.subtle.importKey("raw", encoder.encode(keyString), { name: "PBKDF2" }, false, ["deriveKey"]);
 
-			// Step 5: Derive AES-GCM key using PBKDF2
+			//Step 5: Derive AES-GCM key using PBKDF2
 			const aesKey = await window.crypto.subtle.deriveKey(
 				{
 					name: "PBKDF2",
@@ -967,12 +1038,12 @@
 				["decrypt"],
 			);
 
-			// Step 6: Decrypt using AES-GCM
+			//Step 6: Decrypt using AES-GCM
 			const decryptedData = await window.crypto.subtle.decrypt(
 				{
 					name: "AES-GCM",
 					iv: iv,
-					additionalData: encoder.encode(keyString.slice(0, 9)), // First 9 chars as AAD
+					additionalData: encoder.encode(keyString.slice(0, 9)), //First 9 chars as AAD
 					tagLength: 128,
 				},
 				aesKey,
@@ -986,7 +1057,12 @@
 		}
 	}
 
-	// Convert base64 string to ArrayBuffer
+	/**
+	 * Convert a base64 string to an ArrayBuffer.
+	 *
+	 * @param {string} base64 - The base64 string to convert.
+	 * @returns {ArrayBuffer} The resulting ArrayBuffer.
+	 */
 	function base64ToArrayBuffer(base64) {
 		const binaryString = atob(base64);
 		const bytes = new Uint8Array(binaryString.length);
@@ -996,7 +1072,12 @@
 		return bytes.buffer;
 	}
 
-	// Detect image format from magic numbers
+	/**
+	 * Detect the image format based on the magic numbers in the ArrayBuffer.
+	 *
+	 * @param {ArrayBuffer} arrayBuffer - The ArrayBuffer containing the image data.
+	 * @returns {string} The detected image format ("png", "jpeg", "webp", "gif", or "unknown").
+	 */
 	function detectImageFormat(arrayBuffer) {
 		const bytes = new Uint8Array(arrayBuffer);
 
@@ -1004,7 +1085,7 @@
 			return "unknown";
 		}
 
-		// PNG: 89 50 4E 47 0D 0A 1A 0A
+		//PNG: 89 50 4E 47 0D 0A 1A 0A
 		const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 		let isPNG = true;
 		for (let i = 0; i < pngSignature.length; i++) {
@@ -1013,21 +1094,23 @@
 				break;
 			}
 		}
-		if (isPNG) return "png";
+		if (isPNG) {
+			return "png";
+		}
 
-		// JPEG: FF D8 FF
+		//JPEG: FF D8 FF
 		if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
 			return "jpeg";
 		}
 
-		// WebP: RIFF ... WEBP
+		//WebP: RIFF ... WEBP
 		if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
 			if (bytes.length >= 12 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
 				return "webp";
 			}
 		}
 
-		// GIF: GIF87a or GIF89a
+		//GIF: GIF87a or GIF89a
 		if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
 			return "gif";
 		}
@@ -1035,7 +1118,13 @@
 		return "unknown";
 	}
 
-	// Helper to log first N bytes
+	/**
+	 * Log the first N bytes of an ArrayBuffer for debugging purposes.
+	 *
+	 * @param {ArrayBuffer} arrayBuffer - The ArrayBuffer to log.
+	 * @param {string} label - A label to identify the log output.
+	 * @param {number} [count=16] - The number of bytes to log.
+	 */
 	function logBytes(arrayBuffer, label, count = 16) {
 		const bytes = new Uint8Array(arrayBuffer);
 		const hex = Array.from(bytes.slice(0, count))
@@ -1043,20 +1132,23 @@
 			.join(" ");
 		console.log(`${label}: ${hex} (${bytes.length} bytes total)`);
 	}
-	let cachedBookInfo = null;
 
-	// Parse the bookInfo script tag that contains all book data
+	/**
+	 * Get the cached bookInfo or parse it from the script tag if not cached.
+	 *
+	 * @returns {Object|null} The bookInfo object or null if not found.
+	 */
 	function getBookInfo() {
 		if (cachedBookInfo) {
 			return cachedBookInfo;
 		}
 
-		// Find the bookInfo script tag
+		//Find the bookInfo script tag
 		const bookInfoScript = document.getElementById("bookInfo");
 		if (bookInfoScript) {
 			try {
 				cachedBookInfo = JSON.parse(bookInfoScript.textContent);
-				console.log("📚 Book Info loaded:", cachedBookInfo);
+				console.log("[INFO] Book Info loaded:", cachedBookInfo);
 				return cachedBookInfo;
 			} catch (error) {
 				console.error("Failed to parse bookInfo:", error);
@@ -1066,27 +1158,31 @@
 		return null;
 	}
 
-	// Extract ASIN from current page
+	/**
+	 * Extract ASIN from current page.
+	 *
+	 * @returns {string|null} The ASIN if found, otherwise null.
+	 */
 	function extractAsinFromPage() {
-		// Try bookInfo first
+		//Try bookInfo first
 		const bookInfo = getBookInfo();
 		if (bookInfo && bookInfo.asin) {
 			return bookInfo.asin;
 		}
 
-		// Try URL (e.g., https://read.amazon.co.jp/manga/B0BC152FG1)
+		//Try URL (e.g., https://read.amazon.co.jp/manga/B0BC152FG1)
 		const urlMatch = window.location.href.match(/\/([A-Z0-9]{10})(?:\/|$)/);
 		if (urlMatch) {
 			return urlMatch[1];
 		}
 
-		// Try meta tag
+		//Try meta tag
 		const metaAsin = document.querySelector('meta[name="asin"]');
 		if (metaAsin) {
 			return metaAsin.content;
 		}
 
-		// Try data attribute
+		//Try data attribute
 		const asinElement = document.querySelector("[data-asin]");
 		if (asinElement) {
 			return asinElement.getAttribute("data-asin");
@@ -1095,49 +1191,68 @@
 		return null;
 	}
 
-	// Extract rendering token from page
+	/**
+	 * Extract rendering token from page
+	 * The rendering token is required for all requests to the render endpoint and is stored in the bookInfo.karamelToken.token field.
+	 * The token also has an expiration time (bookInfo.karamelToken.expiresAt) and must be checked for validity before use.
+	 *
+	 * @returns {string|null} The rendering token if found and valid, otherwise null.
+	 */
 	function extractRenderingToken() {
-		// Get token from bookInfo script tag
+		//Get token from bookInfo script tag
 		const bookInfo = getBookInfo();
 		if (bookInfo && bookInfo.karamelToken && bookInfo.karamelToken.token) {
 			const token = bookInfo.karamelToken.token;
 			const expiresAt = bookInfo.karamelToken.expiresAt;
 
-			// Check if token is still valid
+			//Check if token is still valid
 			if (expiresAt && Date.now() > expiresAt) {
-				console.warn("⚠️ Rendering token has expired!");
+				console.warn("[WARNING] Rendering token has expired!");
 				alert("The rendering token has expired. Please reload the page.");
 				return null;
 			}
 
-			console.log("✓ Rendering token extracted successfully");
+			console.log("[OKAY] Rendering token extracted successfully");
 			console.log("Token expires at:", new Date(expiresAt).toLocaleString());
 			return token;
 		}
 
-		console.error("❌ Could not find rendering token in bookInfo");
+		console.error("[ERROR] Could not find rendering token in bookInfo");
 		return null;
 	}
 
-	// Extract revision ID from page
+	/**
+	 * Extract revision ID from page.
+	 * The revision ID is a unique identifier for the specific version of the book and is required for all requests to the render endpoint. It is stored in the bookInfo.contentGuid field.
+	 *
+	 * @returns {string|null} The revision ID if found, otherwise null.
+	 */
 	function extractRevision() {
-		// Get revision from bookInfo (stored as contentGuid)
+		//Get revision from bookInfo (stored as contentGuid)
 		const bookInfo = getBookInfo();
 		if (bookInfo && bookInfo.contentGuid) {
-			console.log("✓ Revision extracted:", bookInfo.contentGuid);
+			console.log("[OKAY] Revision extracted:", bookInfo.contentGuid);
 			return bookInfo.contentGuid;
 		}
 
-		console.error("❌ Could not find revision (contentGuid) in bookInfo");
+		console.error("[ERROR] Could not find revision (contentGuid) in bookInfo");
 		return null;
 	}
 
-	// Sanitize filename
+	/**
+	 * Sanitize a filename by replacing invalid characters with underscores and truncating to 200 characters.
+	 * This ensures the filename is safe for most file systems and prevents issues with excessively long names.
+	 *
+	 * @param {string} filename The filename to sanitize.
+	 * @returns {string} The sanitized filename.
+	 */
 	function sanitizeFilename(filename) {
 		return filename.replace(/[<>:"/\\|?*]/g, "_").substring(0, 200);
 	}
 
-	// Initialize
+	/**
+	 * Initialize the script by adding the download button when the DOM is fully loaded.
+	 */
 	if (document.readyState === "loading") {
 		document.addEventListener("DOMContentLoaded", addDownloadButton);
 	} else {
