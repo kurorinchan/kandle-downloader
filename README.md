@@ -20,7 +20,7 @@ A powerful Tampermonkey/Greasemonkey userscript that allows you to download mang
 - **Chapter Detection**: Automatically parses table of contents and metadata.
 - **Status Checker**: Built-in diagnostic tool to verify download readiness.
 
-![Screenshot of an example download for a manga on the Amazon Kindle Web Reader](docs/images/downloadexample.png)
+![Screenshot of an example download for a manga on the Amazon Kindle Web Reader](docs/images/downloadexample.webp)
 
 ## Installation
 
@@ -179,7 +179,7 @@ AI assisted and developed contributions are okay, but they must be clearly label
 ### Development Setup
 
 1. Fork the repository
-2. Make your changes to `kindle-manga-download.js`
+2. Make your changes to `kindle-manga-downloader.js`
 3. Test thoroughly with debug mode first
 4. Submit a pull request with a clear description
 
