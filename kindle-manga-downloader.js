@@ -522,7 +522,7 @@
 				{
 					value: "zip",
 					title: "ZIP Archive",
-					description: "Simple compressed archive of all images",
+					description: "Simple compressed archive of all images.",
 					note: null,
 				},
 				{
