@@ -162,7 +162,7 @@ You can modify various parameters in the script:
 ### Download stops prematurely
 - Check browser console for errors
 - Verify internet connection stability
-- Note: The download sizes are about 150mbs in size for an entire manga volume.  Machines with limited RAM may have issues creating the ZIP archive in browser.
+- Note: The download sizes are about 75mbs in size for an entire manga volume.  Machines with limited RAM may have issues creating the ZIP archive in browser.
 
 ### Images appear corrupted
 - Report the issue with book details and a screenshot demonstrating the issue.  I can't promise a fix if I don't have access to the book to test the issue though.

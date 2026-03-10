@@ -1524,16 +1524,12 @@
 				//Map chapter position to actual page number
 				let pageNum = playOrder; //Fallback: use sequential numbering
 
-				if (bookLocationMap && bookLocationMap.locations && chapter.tocPositionId !== undefined) {
-					//Find the index in locationMap where the position matches the chapter's tocPositionId
-					const positionIndex = bookLocationMap.locations.findIndex((pos) => pos === chapter.tocPositionId);
-					if (positionIndex !== -1) {
-						//Find the corresponding page in imageFiles
-						//imageFiles is sorted by pageIndex, so we need to find which sequential page corresponds to this position
-						const matchingImageIndex = imageFiles.findIndex((img) => img.pageIndex === positionIndex);
-						if (matchingImageIndex !== -1) {
-							pageNum = matchingImageIndex + 1; //1-based page number
-						}
+				if (chapter.tocPositionId !== undefined) {
+					//Find the image whose pageIndex matches the chapter's starting position
+					//imageFiles is sorted by pageIndex and contains the original pageIndex values
+					const matchingImageIndex = imageFiles.findIndex((img) => img.pageIndex === chapter.tocPositionId);
+					if (matchingImageIndex !== -1) {
+						pageNum = matchingImageIndex + 1; //1-based page number
 					}
 				}
 
