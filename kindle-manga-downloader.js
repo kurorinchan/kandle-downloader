@@ -1560,10 +1560,9 @@
 	 *
 	 * @param {number} pageNum The page number (1-indexed).
 	 * @param {string} imageFilename The filename of the image.
-	 * @param {string} title The book title.
 	 * @returns {string} The XHTML content.
 	 */
-	function generatePageXHTML(pageNum, imageFilename, title) {
+	function generatePageXHTML(pageNum, imageFilename) {
 		return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -1686,7 +1685,7 @@ img {
 
 				// Recalculate spread info based on SEQUENTIAL index in EPUB, not original sparse pageIndex
 				// This ensures correct left/right assignment after deduplication
-				const sequentialSpreadInfo = inferSpreadInfo(index, bookCoverPosition, bookIsRTL);
+				const sequentialSpreadInfo = inferSpreadInfo(index);
 
 				processedImages.push({
 					filename: newFileName,
@@ -1703,7 +1702,7 @@ img {
 			processedImages.forEach((img, index) => {
 				const pageNum = index + 1;
 				const xhtmlFile = `page${String(pageNum).padStart(3, "0")}.xhtml`;
-				const xhtml = generatePageXHTML(pageNum, img.filename, bookMetadata.bookTitle);
+				const xhtml = generatePageXHTML(pageNum, img.filename);
 				epubZip.file(`OEBPS/Text/${xhtmlFile}`, xhtml);
 			});
 
@@ -1744,13 +1743,11 @@ img {
 	 * - LTR: left page first (odd), right page second (even)
 	 *
 	 * @param {number} pageIndex The index of the page (0-based).
-	 * @param {number} coverPosition The position of the cover page.
-	 * @param {boolean} isRTL Whether the reading direction is right-to-left.
 	 * @returns {Object} Spread info with spread and pageSpread properties.
 	 */
-	function inferSpreadInfo(pageIndex, coverPosition, isRTL) {
+	function inferSpreadInfo(pageIndex) {
 		//Cover page should not be in a spread
-		if (pageIndex === coverPosition) {
+		if (pageIndex === bookCoverPosition) {
 			return {
 				spread: "none",
 				pageSpread: null,
@@ -1761,7 +1758,7 @@ img {
 		//In RTL: odd-indexed pages are RIGHT, even-indexed pages are LEFT
 		//In LTR: odd-indexed pages are LEFT, even-indexed pages are RIGHT
 		let pageSpread;
-		if (isRTL) {
+		if (bookIsRTL) {
 			//RTL manga: page 1 is right, page 2 is left, page 3 is right, etc.
 			pageSpread = pageIndex % 2 === 1 ? "right" : "left";
 		} else {
@@ -1837,7 +1834,7 @@ img {
 							//Infer page spread metadata for EPUB generation
 							//Since Kindle API doesn't provide explicit spread properties,
 							//we infer them based on page position and reading direction
-							const spreadInfo = inferSpreadInfo(page.pageIndex, bookCoverPosition, bookIsRTL);
+							const spreadInfo = inferSpreadInfo(page.pageIndex);
 
 							//Store unique image by elementId
 							imageMap.set(child.elementId, {
