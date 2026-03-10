@@ -85,6 +85,15 @@
 
 	let currentModal = null;
 	let cachedBookInfo = null;
+	let progressModal = null;
+
+	//Script-scoped variables for frequently reused metadata-derived values
+	let bookMetadata = null;
+	let bookToc = null;
+	let bookLocationMap = null;
+	let bookLanguage = "en";
+	let bookIsRTL = false;
+	let bookCoverPosition = 0;
 
 	/**
 	 * Get the current Amazon domain (either read.amazon.co.jp or read.amazon.com).
@@ -934,7 +943,6 @@
 	 * @returns {Promise<void>}
 	 */
 	async function downloadBook() {
-		let progressModal = null;
 		try {
 			log.info("Starting book download...");
 
@@ -970,19 +978,37 @@
 			const locationMap = tocFiles["location_map.json"];
 			const initialManifest = tocFiles["manifest.json"];
 
+			//Store metadata-derived values in script scope for reuse across functions
+			bookMetadata = metadata;
+			bookToc = toc;
+			bookLocationMap = locationMap;
+
+			//Detect language
+			if (bookMetadata.lang) {
+				bookLanguage = bookMetadata.lang;
+			} else if (bookMetadata.language) {
+				bookLanguage = bookMetadata.language;
+			}
+
+			//Detect reading direction from metadata (RTL for manga)
+			bookIsRTL = bookMetadata.progressionDirection === "rtl" || bookMetadata.direction === "rtl";
+
+			//Get cover position
+			bookCoverPosition = bookMetadata?.coverPosistion ?? bookMetadata?.coverPosition ?? 0;
+
 			progressModal.addStatus("[OKAY] Table of Contents loaded", "success");
 			log.info("Book Info:");
-			log.info("  Title:", metadata.bookTitle);
-			log.info("  Authors:", metadata.authors);
-			log.info("  First Position:", metadata.firstPositionId);
-			log.info("  Last Position:", metadata.lastPositionId);
-			log.info("  Total Locations:", locationMap.locations.length);
-			toc.forEach((chapter) => {
+			log.info("  Title:", bookMetadata.bookTitle);
+			log.info("  Authors:", bookMetadata.authors);
+			log.info("  First Position:", bookMetadata.firstPositionId);
+			log.info("  Last Position:", bookMetadata.lastPositionId);
+			log.info("  Total Locations:", bookLocationMap.locations.length);
+			bookToc.forEach((chapter) => {
 				log.info(`    - ${chapter.label} (position ${chapter.tocPositionId})`);
 			});
 
 			//Step 2: Calculate how many requests we need
-			const totalLocations = locationMap.locations.length;
+			const totalLocations = bookLocationMap.locations.length;
 			const pagesPerRequest = 2;
 			const estimatedRequests = Math.ceil(totalLocations / pagesPerRequest);
 
@@ -993,10 +1019,10 @@
 
 			progressModal.close();
 			const selectedFormat = await showFormatSelectionModal({
-				bookTitle: metadata.bookTitle,
+				bookTitle: bookMetadata.bookTitle,
 				totalLocations: totalLocations,
 				estimatedRequests: estimatedRequests,
-				chapters: toc.length,
+				chapters: bookToc.length,
 			});
 
 			if (!selectedFormat) {
@@ -1041,7 +1067,7 @@
 					break;
 				}
 				requestCount++;
-				const startPos = locationMap.locations[posIndex];
+				const startPos = bookLocationMap.locations[posIndex];
 
 				try {
 					const pageBuffer = await fetchPages(asin, revision, renderingToken, startPos, pagesPerRequest);
@@ -1094,7 +1120,7 @@
 				cdnResources: Array.from(allCdnResources.values()),
 			};
 
-			await downloadImages(mergedManifest, allPageData, metadata, bookInfo.karamelToken, progressModal, selectedFormat, toc);
+			await downloadImages(mergedManifest, allPageData, bookInfo.karamelToken, selectedFormat);
 		} catch (error) {
 			if (progressModal) progressModal.close();
 			log.error("Download failed:", error);
@@ -1106,14 +1132,12 @@
 	 * Generate ComicInfo.xml metadata for CBZ format.
 	 * This XML file contains metadata about the comic/manga according to the ComicInfo schema.
 	 *
-	 * @param {Object} metadata The book metadata containing title, authors, etc.
-	 * @param {Array} toc The table of contents with chapter information.
 	 * @param {number} pageCount The total number of pages in the book.
 	 * @returns {string} The ComicInfo.xml content as a string.
 	 *
 	 * @see https://anansi-project.github.io/docs/comicinfo/documentation
 	 */
-	function generateComicInfoXML(metadata, toc, pageCount) {
+	function generateComicInfoXML(pageCount) {
 		/**
 		 * Escape XML special characters to prevent malformed XML.
 		 * @param {string} str The string to escape.
@@ -1127,27 +1151,15 @@
 		}
 
 		//Extract metadata fields.
-		const title = escapeXML(metadata.bookTitle || "Unknown Title");
+		const title = escapeXML(bookMetadata.bookTitle || "Unknown Title");
 
 		//Handle authors - can be a string or array
 		let authors = "";
-		if (metadata.authors) {
-			if (Array.isArray(metadata.authors)) {
-				authors = metadata.authors.map(escapeXML).join(", ");
+		if (bookMetadata.authors) {
+			if (Array.isArray(bookMetadata.authors)) {
+				authors = bookMetadata.authors.map(escapeXML).join(", ");
 			} else {
-				authors = escapeXML(metadata.authors);
-			}
-		}
-
-		//Try to detect language from metadata or default to English.
-		let languageISO = "en";
-		if (metadata.language) {
-			languageISO = metadata.language;
-		} else if (metadata.bookTitle) {
-			//Simple heuristic: if title contains Japanese characters, assume Japanese.
-			//This isn't perfect.  Some Japanese titles contain only kanji which could be misinterpreted for Chinese.
-			if (/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(metadata.bookTitle)) {
-				languageISO = "ja";
+				authors = escapeXML(bookMetadata.authors);
 			}
 		}
 
@@ -1164,7 +1176,7 @@
 
 		xml += `  <PageCount>${pageCount}</PageCount>\n`;
 		xml += `  <Manga>Yes</Manga>\n`; //TODO: Make this a variable in the future in the case of non-manga style comic books.
-		xml += `  <LanguageISO>${escapeXML(languageISO)}</LanguageISO>\n`;
+		xml += `  <LanguageISO>${escapeXML(bookLanguage)}</LanguageISO>\n`;
 
 		//Publisher and source information
 		//TODO: Hard coded for now, lets try to fix this in the future.
@@ -1172,20 +1184,20 @@
 		xml += `  <Notes>Downloaded from Amazon Kindle. Downloaded with Kindle Manga Downloader.</Notes>\n`;
 
 		//Add ASIN if available
-		if (metadata.asin) {
+		if (bookMetadata.asin) {
 			//TODO: Fix domain selection.
-			xml += `  <Web>https://www.amazon.com/dp/${escapeXML(metadata.asin)}</Web>\n`;
+			xml += `  <Web>https://www.amazon.com/dp/${escapeXML(bookMetadata.asin)}</Web>\n`;
 		}
 
 		//Optional: Add series information if we can extract it from TOC or metadata
 		//Series name might be in the title
-		if (metadata.seriesName) {
-			xml += `  <Series>${escapeXML(metadata.seriesName)}</Series>\n`;
+		if (bookMetadata.seriesName) {
+			xml += `  <Series>${escapeXML(bookMetadata.seriesName)}</Series>\n`;
 		}
 
 		//Optional: Add volume number if available
-		if (metadata.volumeNumber) {
-			xml += `  <Volume>${escapeXML(metadata.volumeNumber)}</Volume>\n`;
+		if (bookMetadata.volumeNumber) {
+			xml += `  <Volume>${escapeXML(bookMetadata.volumeNumber)}</Volume>\n`;
 		}
 
 		//Format - always Manga for this downloader
@@ -1212,12 +1224,9 @@
 	 * - Images with sequential naming (page_001.ext, page_002.ext, etc.)
 	 *
 	 * @param {JSZip} sourceZip The source ZIP containing images with original filenames.
-	 * @param {Object} metadata The book metadata.
-	 * @param {Array} toc The table of contents.
-	 * @param {Object} progressModal The progress modal for status updates.
 	 * @returns {Promise<JSZip>} A new JSZip instance formatted as CBZ.
 	 */
-	async function generateCBZ(sourceZip, metadata, toc, progressModal) {
+	async function generateCBZ(sourceZip) {
 		try {
 			log.info("Generating CBZ format...");
 			progressModal.addStatus("📚 Converting to CBZ format...", "info");
@@ -1281,7 +1290,7 @@
 
 			//Step 3: Generate and add ComicInfo.xml.
 			try {
-				const comicInfoXML = generateComicInfoXML(metadata, toc, imageFiles.length);
+				const comicInfoXML = generateComicInfoXML(imageFiles.length);
 				cbzZip.file("ComicInfo.xml", comicInfoXML);
 				log.okay(`CBZ: ComicInfo.xml generated (${comicInfoXML.length} bytes)`);
 			} catch (xmlError) {
@@ -1320,12 +1329,10 @@
 	 * Generate content.opf for EPUB format.
 	 * This is the main package document that contains metadata, manifest, and spine.
 	 *
-	 * @param {Object} metadata The book metadata.
 	 * @param {Array} imageFiles Array of image file objects with {filename, extension} properties.
-	 * @param {Array} toc The table of contents.
 	 * @returns {string} The content.opf content.
 	 */
-	function generateContentOPF(metadata, imageFiles, toc) {
+	function generateContentOPF(imageFiles) {
 		/**
 		 * Escape XML special characters.
 		 * @param {string} str The string to escape.
@@ -1336,38 +1343,27 @@
 			return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 		}
 
-		const title = escapeXML(metadata.bookTitle || "Unknown Title");
+		const title = escapeXML(bookMetadata.bookTitle || "Unknown Title");
 		let authors = "";
-		if (metadata.authors) {
-			if (Array.isArray(metadata.authors)) {
-				authors = metadata.authors.map(escapeXML).join(", ");
+		if (bookMetadata.authors) {
+			if (Array.isArray(bookMetadata.authors)) {
+				authors = bookMetadata.authors.map(escapeXML).join(", ");
 			} else {
-				authors = escapeXML(metadata.authors);
+				authors = escapeXML(bookMetadata.authors);
 			}
 		}
 
 		//Generate a unique identifier (use ASIN if available, otherwise generate UUID)
-		const identifier = metadata.asin || `uuid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+		const identifier = bookMetadata.asin || `uuid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-		//Detect language
-		let language = "en";
-		if (metadata.lang) {
-			language = metadata.lang;
-		} else if (metadata.language) {
-			language = metadata.language;
-		} else if (metadata.bookTitle && /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(metadata.bookTitle)) {
-			language = "ja";
-		}
-
-		//Detect reading direction from metadata (RTL for manga)
-		const isRTL = metadata.progressionDirection === "rtl" || metadata.direction === "rtl" || language === "ja";
+		//Use script-scoped language and RTL values set in downloadBook
 
 		let opf = `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookID">
 	<metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
 		<dc:title>${title}</dc:title>
 		<dc:identifier id="BookID">${escapeXML(identifier)}</dc:identifier>
-		<dc:language>${escapeXML(language)}</dc:language>`;
+		<dc:language>${escapeXML(bookLanguage)}</dc:language>`;
 
 		if (authors) {
 			opf += `
@@ -1383,7 +1379,7 @@
 		<meta property="rendition:spread">auto</meta>`;
 
 		//Add right-to-left page progression direction if detected
-		if (isRTL) {
+		if (bookIsRTL) {
 			opf += `
 		<meta property="rendition:page-progression-direction">rtl</meta>`;
 		}
@@ -1435,6 +1431,8 @@
 
 			//Add spread properties if available
 			if (img.spreadInfo) {
+				const properties = [];
+
 				// rendition:spread can be "auto", "both", "none", or "landscape"
 				// - "auto": Let the reader decide based on viewport
 				// - "both": This page should always be displayed as two-page spread
@@ -1442,25 +1440,24 @@
 				// - "landscape": This is a landscape page that spans both pages
 				if (img.spreadInfo.spread === "none") {
 					// Cover or single page that should not be paired
-					itemrefAttrs += ` properties="rendition:spread-none"`;
+					properties.push("rendition:spread-none");
 				} else if (img.spreadInfo.spread === "both" || img.spreadInfo.spread === "landscape") {
 					// Double page spread
-					itemrefAttrs += ` properties="rendition:spread-both"`;
+					properties.push("rendition:spread-both");
 				}
 				// For "auto" or null, we don't add any spread property
 
 				// rendition:page-spread-left or rendition:page-spread-right
 				// Indicates which side this page should appear on in a two-page spread
 				if (img.spreadInfo.pageSpread === "left") {
-					const currentProps = itemrefAttrs.includes('properties="')
-						? itemrefAttrs.replace('properties="', 'properties="rendition:page-spread-left ')
-						: itemrefAttrs + ` properties="rendition:page-spread-left"`;
-					itemrefAttrs = currentProps.replace('properties="', 'properties="').replace('" properties="', " ");
+					properties.push("rendition:page-spread-left");
 				} else if (img.spreadInfo.pageSpread === "right") {
-					const currentProps = itemrefAttrs.includes('properties="')
-						? itemrefAttrs.replace('properties="', 'properties="rendition:page-spread-right ')
-						: itemrefAttrs + ` properties="rendition:page-spread-right"`;
-					itemrefAttrs = currentProps.replace('properties="', 'properties="').replace('" properties="', " ");
+					properties.push("rendition:page-spread-right");
+				}
+
+				// Add properties attribute if we have any properties
+				if (properties.length > 0) {
+					itemrefAttrs += ` properties="${properties.join(" ")}"`;
 				}
 			}
 
@@ -1479,12 +1476,10 @@
 	 * Generate toc.ncx for EPUB format.
 	 * This is the navigation document for EPUB 2.0 compatibility.
 	 *
-	 * @param {Object} metadata The book metadata.
 	 * @param {Array} imageFiles Array of image file objects.
-	 * @param {Array} toc The table of contents.
 	 * @returns {string} The toc.ncx content.
 	 */
-	function generateTocNCX(metadata, imageFiles, toc) {
+	function generateTocNCX(imageFiles) {
 		/**
 		 * Escape XML special characters.
 		 * @param {string} str The string to escape.
@@ -1495,8 +1490,8 @@
 			return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 		}
 
-		const title = escapeXML(metadata.bookTitle || "Unknown Title");
-		const identifier = metadata.asin || `uuid-${Date.now()}`;
+		const title = escapeXML(bookMetadata.bookTitle || "Unknown Title");
+		const identifier = bookMetadata.asin || `uuid-${Date.now()}`;
 
 		let ncx = `<?xml version="1.0" encoding="UTF-8"?>
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
@@ -1512,7 +1507,7 @@
 	<navMap>`;
 
 		//For manga without chapter info, create a single entry pointing to first page
-		if (!toc || toc.length === 0) {
+		if (!bookToc || bookToc.length === 0) {
 			ncx += `
 		<navPoint id="navpoint-1" playOrder="1">
 			<navLabel>
@@ -1522,12 +1517,26 @@
 		</navPoint>`;
 		} else {
 			//Add chapter entries if TOC is available
-			//Note: This is simplified - proper chapter mapping would require locationMap analysis
-			toc.forEach((chapter, index) => {
+			bookToc.forEach((chapter, index) => {
 				const playOrder = index + 1;
-				const chapterTitle = escapeXML(chapter.title || `Chapter ${playOrder}`);
-				//For now, just link to sequential pages (TODO: proper chapter-to-page mapping)
-				const pageNum = index + 1;
+				const chapterTitle = escapeXML(chapter.label || chapter.title || `Chapter ${playOrder}`);
+
+				//Map chapter position to actual page number
+				let pageNum = playOrder; //Fallback: use sequential numbering
+
+				if (bookLocationMap && bookLocationMap.locations && chapter.tocPositionId !== undefined) {
+					//Find the index in locationMap where the position matches the chapter's tocPositionId
+					const positionIndex = bookLocationMap.locations.findIndex((pos) => pos === chapter.tocPositionId);
+					if (positionIndex !== -1) {
+						//Find the corresponding page in imageFiles
+						//imageFiles is sorted by pageIndex, so we need to find which sequential page corresponds to this position
+						const matchingImageIndex = imageFiles.findIndex((img) => img.pageIndex === positionIndex);
+						if (matchingImageIndex !== -1) {
+							pageNum = matchingImageIndex + 1; //1-based page number
+						}
+					}
+				}
+
 				const pageFile = `page${String(pageNum).padStart(3, "0")}.xhtml`;
 				ncx += `
 		<navPoint id="navpoint-${playOrder}" playOrder="${playOrder}">
@@ -1609,18 +1618,13 @@ img {
 	 * EPUB is a standardized e-book format with proper structure and metadata.
 	 *
 	 * @param {JSZip} sourceZip The source ZIP containing images.
-	 * @param {Object} metadata The book metadata.
-	 * @param {Array} toc The table of contents.
-	 * @param {Object} progressModal The progress modal for status updates.
-	 * @param {Object} pageSpreadMetadata Optional mapping of pageIndex to spread metadata.
 	 * @returns {Promise<JSZip>} A new JSZip instance formatted as EPUB.
 	 */
-	async function generateEPUB(sourceZip, metadata, toc, progressModal, pageSpreadMetadata = {}) {
+	async function generateEPUB(sourceZip) {
 		try {
 			log.info("Generating EPUB format...");
 			progressModal.addStatus("📖 Converting to EPUB format...", "info");
 
-			//Create a new ZIP for EPUB
 			const epubZip = new JSZip();
 
 			//Step 1: Extract and sort images from source ZIP
@@ -1680,14 +1684,15 @@ img {
 				const newFileName = `page_${String(sequentialNumber).padStart(3, "0")}.${img.extension}`;
 				epubZip.file(`OEBPS/Images/${newFileName}`, img.data);
 
-				//Attach spread metadata if available for this page
-				const spreadInfo = pageSpreadMetadata[img.pageIndex] || null;
+				// Recalculate spread info based on SEQUENTIAL index in EPUB, not original sparse pageIndex
+				// This ensures correct left/right assignment after deduplication
+				const sequentialSpreadInfo = inferSpreadInfo(index, bookCoverPosition, bookIsRTL);
 
 				processedImages.push({
 					filename: newFileName,
 					extension: img.extension,
 					pageIndex: img.pageIndex,
-					spreadInfo: spreadInfo,
+					spreadInfo: sequentialSpreadInfo,
 				});
 				log.info(`EPUB: Added image ${newFileName}`);
 			});
@@ -1698,7 +1703,7 @@ img {
 			processedImages.forEach((img, index) => {
 				const pageNum = index + 1;
 				const xhtmlFile = `page${String(pageNum).padStart(3, "0")}.xhtml`;
-				const xhtml = generatePageXHTML(pageNum, img.filename, metadata.bookTitle);
+				const xhtml = generatePageXHTML(pageNum, img.filename, bookMetadata.bookTitle);
 				epubZip.file(`OEBPS/Text/${xhtmlFile}`, xhtml);
 			});
 
@@ -1710,12 +1715,12 @@ img {
 			log.okay("EPUB: Added stylesheet");
 
 			//Step 7: Generate and add content.opf
-			const contentOPF = generateContentOPF(metadata, processedImages, toc);
+			const contentOPF = generateContentOPF(processedImages);
 			epubZip.file("OEBPS/content.opf", contentOPF);
 			log.okay("EPUB: Added content.opf");
 
 			//Step 8: Generate and add toc.ncx
-			const tocNCX = generateTocNCX(metadata, processedImages, toc);
+			const tocNCX = generateTocNCX(processedImages);
 			epubZip.file("OEBPS/toc.ncx", tocNCX);
 			log.okay("EPUB: Added toc.ncx");
 
@@ -1777,14 +1782,11 @@ img {
 	 *
 	 * @param {Object} manifest The manifest containing CDN resources and authentication info.
 	 * @param {Array} pageData The array of page data objects.
-	 * @param {Object} metadata The metadata of the book.
 	 * @param {Object} karamelToken The Karamel token for authentication.
-	 * @param {Object} progressModal The progress modal for updating download status.
 	 * @param {string} format The output format ('zip', 'cbz', or 'epub').
-	 * @param {Array} toc The table of contents data with chapter information.
 	 * @returns {Promise<void>}
 	 */
-	async function downloadImages(manifest, pageData, metadata, karamelToken, progressModal, format = "zip", toc = []) {
+	async function downloadImages(manifest, pageData, karamelToken, format = "zip") {
 		if (!manifest || !manifest.cdnResources || !manifest.cdn) {
 			log.error("Invalid manifest data");
 			return;
@@ -1804,11 +1806,8 @@ img {
 
 		log.info("Resource Map:", resourceMap);
 
-		//Determine reading direction and cover position from metadata
-		const isRTL = metadata?.progressionDirection === "rtl" || metadata?.direction === "rtl";
-		const coverPosition = metadata?.coverPosistion ?? metadata?.coverPosition ?? 0;
-
-		log.info(`Reading direction: ${isRTL ? "RTL" : "LTR"}, Cover position: ${coverPosition}`);
+		//Use script-scoped RTL and cover position values set in downloadBook
+		log.info(`Reading direction: ${bookIsRTL ? "RTL" : "LTR"}, Cover position: ${bookCoverPosition}`);
 
 		//Extract image references and infer spread metadata from page data
 		//Use a Map to deduplicate images by elementId (same image may appear on multiple pages)
@@ -1821,7 +1820,7 @@ img {
 						if (imageMap.has(child.elementId)) {
 							return;
 						}
-						
+
 						const resource = resourceMap[child.imageReference];
 						if (resource) {
 							//Build full URL with auth parameters from manifest AND karamel token
@@ -1838,7 +1837,7 @@ img {
 							//Infer page spread metadata for EPUB generation
 							//Since Kindle API doesn't provide explicit spread properties,
 							//we infer them based on page position and reading direction
-							const spreadInfo = inferSpreadInfo(page.pageIndex, coverPosition, isRTL);
+							const spreadInfo = inferSpreadInfo(page.pageIndex, bookCoverPosition, bookIsRTL);
 
 							//Store unique image by elementId
 							imageMap.set(child.elementId, {
@@ -1856,10 +1855,10 @@ img {
 
 		//Convert Map to array and sort by pageIndex to maintain correct order
 		const imageUrls = Array.from(imageMap.values()).sort((a, b) => a.pageIndex - b.pageIndex);
-		
+
 		//Log deduplication info
 		log.info(`Found ${imageUrls.length} unique images to download`);
-		
+
 		//Log spread info for debugging (only for first few pages)
 		imageUrls.slice(0, 5).forEach((img) => {
 			log.info(`Page ${img.pageIndex} (element ${img.elementId}) spread info:`, img.spreadInfo);
@@ -1881,7 +1880,7 @@ img {
 		}
 
 		const zip = new JSZip();
-		const bookTitle = metadata?.bookTitle || "manga";
+		const bookTitle = bookMetadata?.bookTitle || "manga";
 
 		const maxImages = DEBUG_MODE ? Math.min(DEBUG_MAX_IMAGES, imageUrls.length) : imageUrls.length;
 		if (DEBUG_MODE) {
@@ -1966,7 +1965,7 @@ img {
 		if (format === "cbz") {
 			try {
 				log.info("Starting CBZ conversion...");
-				finalZip = await generateCBZ(finalZip, metadata, toc, progressModal);
+				finalZip = await generateCBZ(finalZip);
 				log.okay("CBZ conversion completed successfully");
 			} catch (cbzError) {
 				log.error("CBZ conversion failed, falling back to ZIP:", cbzError);
@@ -1975,7 +1974,7 @@ img {
 		} else if (format === "epub") {
 			try {
 				log.info("Starting EPUB conversion...");
-				finalZip = await generateEPUB(finalZip, metadata, toc, progressModal, pageSpreadMetadata);
+				finalZip = await generateEPUB(finalZip);
 				log.okay("EPUB conversion completed successfully");
 				archiveType = "ZIP";
 			} catch (epubError) {

@@ -196,6 +196,7 @@ AI assisted and developed contributions are okay, but they must be clearly label
 ### Future Plans
 
 - Extend chapter support.
+- Fix the stupid compact/extract process for CBZ/EPUB.
 - Option to create reader compatible formats instead of a ZIP archive.
 - KFX/KPF Format - I don't know much about this, but it might be useful for Kindle users.
 - Full book support instead of just manga images. (Rename project to Kindle-Web-Downloader?  Kindle-Karamel-Downloader?)
