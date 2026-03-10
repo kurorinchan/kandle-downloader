@@ -11,14 +11,16 @@ A powerful Tampermonkey/Greasemonkey userscript that allows you to download mang
 
 ## Features
 
-- **One-Click Downloads**: Simple download button added directly to the Kindle reader interface
-- **Automatic Decryption**: Images are decrypted automatically
-- **Progress Tracking**: Real-time progress modal with detailed status updates
-- **ZIP Packaging**: Automatically creates organized ZIP archives with properly named images
+- **One Click Downloads**: Simple download button added directly to the Kindle reader interface.
+- **Automatic Decryption**: Images are decrypted automatically.
+- **Progress Tracking**: Real-time progress modal with detailed status updates.
+- **ZIP Packaging**: Automatically creates organized ZIP archives with properly named images.
 - **High Quality**: Downloads original compression ratio images.
 - **Multi-Region Support**: Works with both Amazon.co.jp and Amazon.com.
 - **Chapter Detection**: Automatically parses table of contents and metadata.
 - **Status Checker**: Built-in diagnostic tool to verify download readiness.
+
+![Screenshot of an example download for a manga on the Amazon Kindle Web Reader](docs/images/downloadexample.png)
 
 ## Installation
 
@@ -195,6 +197,7 @@ AI assisted and developed contributions are okay, but they must be clearly label
 
 - Extend chapter support.
 - Option to create reader compatible formats instead of a ZIP archive.
+- KFX/KPF Format - I don't know much about this, but it might be useful for Kindle users.
 - Full book support instead of just manga images. (Rename project to Kindle-Web-Downloader?  Kindle-Karamel-Downloader?)
 
 ## License
