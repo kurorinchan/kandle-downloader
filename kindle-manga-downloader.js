@@ -95,21 +95,9 @@
 	let bookIsRTL = false;
 	let bookCoverPosition = 0;
 
-	/**
-	 * Get the current Amazon domain (either read.amazon.co.jp or read.amazon.com).
-	 * Returns null if not on a supported domain.
-	 *
-	 * @returns {string|null} The current Amazon domain or null if invalid.
-	 */
-	function getCurrentDomain() {
-		const hostname = window.location.hostname;
-		if (hostname === "read.amazon.co.jp") {
-			return "read.amazon.co.jp";
-		} else if (hostname === "read.amazon.com") {
-			return "read.amazon.com";
-		}
-		return null;
-	}
+	/********************************************************************/
+	/* GUI                                                              */
+	/********************************************************************/
 
 	/**
 	 * Inject the CSS styles into the page.
@@ -840,102 +828,9 @@
 		}
 	}
 
-	/**
-	 * Parse a TAR response and extract JSON files.
-	 * This function uses the js-untar library to parse the TAR file and extracts JSON content from the files.
-	 * It skips any PaxHeaders (metadata files) and returns a map of file names to their parsed JSON content.
-	 *
-	 * @param {ArrayBuffer} arrayBuffer The TAR response as an ArrayBuffer.
-	 * @returns {Promise<Object>} A map of file names to parsed JSON objects.
-	 */
-	async function parseTarResponse(arrayBuffer) {
-		try {
-			const files = await untar(arrayBuffer);
-			const fileMap = {};
-
-			for (const file of files) {
-				//Skip PaxHeaders (metadata files)
-				if (file.name.includes("PaxHeaders")) {
-					continue;
-				}
-
-				//Convert file blob to text for JSON files
-				const text = await file.blob.text();
-				fileMap[file.name] = JSON.parse(text);
-				log.info(`Parsed: ${file.name}`);
-			}
-
-			return fileMap;
-		} catch (error) {
-			log.error("Error parsing TAR:", error);
-			throw error;
-		}
-	}
-
-	/**
-	 * Fetch pages from the render endpoint.
-	 *
-	 * @param {string} asin The ASIN of the book.
-	 * @param {string} revision The revision of the book.
-	 * @param {string} renderingToken The rendering token for authentication.
-	 * @param {number} startingPosition The starting position for fetching pages.
-	 * @param {number} numPages The number of pages to fetch.
-	 * @param {boolean} includeLocationMap Whether to include the location map.
-	 * @returns {Promise<ArrayBuffer>} The fetched page data as an ArrayBuffer.
-	 */
-	async function fetchPages(asin, revision, renderingToken, startingPosition, numPages = 2, includeLocationMap = false) {
-		//There are some hard coded parameters here that eventually will need to be tweaked or made configurable as features are added.
-		const params = new URLSearchParams({
-			version: "3.0",
-			asin: asin,
-			contentType: "FullBook",
-			revision: revision,
-			fontFamily: "Bookerly",
-			fontSize: "4.95",
-			lineHeight: "1.4",
-			dpi: "160",
-			height: "808",
-			width: "2560",
-			marginBottom: "0",
-			marginLeft: "9",
-			marginRight: "9",
-			marginTop: "0",
-			maxNumberColumns: "2",
-			theme: "dark",
-			packageType: "TAR",
-			encryptionVersion: "NONE",
-			numPage: String(numPages),
-			skipPageCount: "0",
-			startingPosition: String(startingPosition),
-			bundleImages: "false",
-		});
-
-		//Only include locationMap when fetching TOC
-		if (includeLocationMap) {
-			params.set("locationMap", "true");
-		}
-
-		const domain = getCurrentDomain();
-		if (!domain) {
-			throw new Error("Invalid domain. This tool only works on read.amazon.co.jp or read.amazon.com");
-		}
-		const renderUrl = `https://${domain}/renderer/render?${params.toString()}`;
-		log.info(`Fetching position ${startingPosition}...`);
-
-		const response = await fetch(renderUrl, {
-			credentials: "include",
-			headers: {
-				Accept: "application/x-tar",
-				"x-amz-rendering-token": renderingToken,
-			},
-		});
-
-		if (!response.ok) {
-			throw new Error(`HTTP error! status: ${response.status}`);
-		}
-
-		return await response.arrayBuffer();
-	}
+	/********************************************************************/
+	/* Downloading                                                      */
+	/********************************************************************/
 
 	/**
 	 * Download the book by fetching pages, parsing them, and queueing images for download.
@@ -1129,6 +1024,504 @@
 	}
 
 	/**
+	 * Fetch pages from the render endpoint.
+	 *
+	 * @param {string} asin The ASIN of the book.
+	 * @param {string} revision The revision of the book.
+	 * @param {string} renderingToken The rendering token for authentication.
+	 * @param {number} startingPosition The starting position for fetching pages.
+	 * @param {number} numPages The number of pages to fetch.
+	 * @param {boolean} includeLocationMap Whether to include the location map.
+	 * @returns {Promise<ArrayBuffer>} The fetched page data as an ArrayBuffer.
+	 */
+	async function fetchPages(asin, revision, renderingToken, startingPosition, numPages = 2, includeLocationMap = false) {
+		//There are some hard coded parameters here that eventually will need to be tweaked or made configurable as features are added.
+		const params = new URLSearchParams({
+			version: "3.0",
+			asin: asin,
+			contentType: "FullBook",
+			revision: revision,
+			fontFamily: "Bookerly",
+			fontSize: "4.95",
+			lineHeight: "1.4",
+			dpi: "160",
+			height: "808",
+			width: "2560",
+			marginBottom: "0",
+			marginLeft: "9",
+			marginRight: "9",
+			marginTop: "0",
+			maxNumberColumns: "2",
+			theme: "dark",
+			packageType: "TAR",
+			encryptionVersion: "NONE",
+			numPage: String(numPages),
+			skipPageCount: "0",
+			startingPosition: String(startingPosition),
+			bundleImages: "false",
+		});
+
+		//Only include locationMap when fetching TOC
+		if (includeLocationMap) {
+			params.set("locationMap", "true");
+		}
+
+		const domain = getCurrentDomain();
+		if (!domain) {
+			throw new Error("Invalid domain. This tool only works on read.amazon.co.jp or read.amazon.com");
+		}
+		const renderUrl = `https://${domain}/renderer/render?${params.toString()}`;
+		log.info(`Fetching position ${startingPosition}...`);
+
+		const response = await fetch(renderUrl, {
+			credentials: "include",
+			headers: {
+				Accept: "application/x-tar",
+				"x-amz-rendering-token": renderingToken,
+			},
+		});
+
+		if (!response.ok) {
+			throw new Error(`HTTP error! status: ${response.status}`);
+		}
+
+		return await response.arrayBuffer();
+	}
+
+	/**
+	 * Download images from the CDN based on the manifest and page data.
+	 * This function extracts image references from the page data, maps them to CDN URLs using the manifest,
+	 * and downloads each image while updating the progress modal.
+	 *
+	 * @param {Object} manifest The manifest containing CDN resources and authentication info.
+	 * @param {Array} pageData The array of page data objects.
+	 * @param {Object} karamelToken The Karamel token for authentication.
+	 * @param {string} archiveFormat The output format ('zip', 'cbz', or 'epub').
+	 * @returns {Promise<void>}
+	 */
+	async function downloadImages(manifest, pageData, karamelToken, archiveFormat = "zip") {
+		const { baseUrl, authParameter } = manifest.cdn;
+		const resourceMap = {};
+
+		if (!manifest || !manifest.cdnResources || !manifest.cdn) {
+			log.error("Invalid manifest data");
+			return;
+		}
+
+		if (archiveFormat !== "zip" && archiveFormat !== "cbz" && archiveFormat !== "epub") {
+			log.error("Unsupported archive format:", archiveFormat);
+			return;
+		}
+
+		//Create a map of resource references to URLs
+		manifest.cdnResources.forEach((resource) => {
+			resourceMap[resource.url] = {
+				url: `${baseUrl}/${resource.url}`,
+				type: resource.type,
+			};
+		});
+
+		log.info("Resource Map:", resourceMap);
+
+		//Use script-scoped RTL and cover position values set in downloadBook
+		log.info(`Reading direction: ${bookIsRTL ? "RTL" : "LTR"}, Cover position: ${bookCoverPosition}`);
+
+		//Extract image references and infer spread metadata from page data
+		//Use a Map to deduplicate images by elementId (same image may appear on multiple pages)
+		const imageMap = new Map();
+		pageData.forEach((page) => {
+			if (page.children) {
+				page.children.forEach((child) => {
+					if (child.imageReference && child.elementId) {
+						//Skip if we've already seen this image
+						if (imageMap.has(child.elementId)) {
+							return;
+						}
+
+						const resource = resourceMap[child.imageReference];
+						if (resource) {
+							//Build full URL with auth parameters from manifest and karamel token.
+							let imageUrl = `${resource.url}?${authParameter}`;
+
+							//Add token and expiration from karamelToken.
+							if (karamelToken && karamelToken.token) {
+								imageUrl += `&token=${encodeURIComponent(karamelToken.token)}`;
+							}
+							if (karamelToken && karamelToken.expiresAt) {
+								imageUrl += `&expiration=${karamelToken.expiresAt}`;
+							}
+
+							//Infer page spread metadata for EPUB generation
+							//Since Kindle API doesn't provide explicit spread properties,
+							//we infer them based on page position and reading direction.
+							const spreadInfo = inferSpreadInfo(page.pageIndex);
+
+							//Store unique image by elementId
+							imageMap.set(child.elementId, {
+								pageIndex: page.pageIndex,
+								url: imageUrl,
+								elementId: child.elementId,
+								resourceType: resource.type,
+								spreadInfo: spreadInfo,
+							});
+						}
+					}
+				});
+			}
+		});
+
+		//Convert Map to array and sort by pageIndex to maintain correct order.
+		const imageUrls = Array.from(imageMap.values()).sort((a, b) => a.pageIndex - b.pageIndex);
+
+		//Log deduplication info.
+		log.info(`Found ${imageUrls.length} unique images to download`);
+
+		//Log spread info for debugging, only for first few pages.
+		imageUrls.slice(0, 5).forEach((img) => {
+			log.info(`Page ${img.pageIndex} (element ${img.elementId}) spread info:`, img.spreadInfo);
+		});
+
+		progressModal.addStatus(`🖼️  Found ${imageUrls.length} images to download`, "info");
+		log.info(`Found ${imageUrls.length} images to download`);
+
+		//Create a mapping of pageIndex to spread metadata for EPUB generation.
+		const pageSpreadMetadata = {};
+		imageUrls.forEach((imgUrl) => {
+			if (imgUrl.spreadInfo && (imgUrl.spreadInfo.spread || imgUrl.spreadInfo.pageSpread)) {
+				pageSpreadMetadata[imgUrl.pageIndex] = imgUrl.spreadInfo;
+			}
+		});
+
+		if (Object.keys(pageSpreadMetadata).length > 0) {
+			log.info(`Found spread metadata for ${Object.keys(pageSpreadMetadata).length} pages`);
+		}
+
+		const zip = new JSZip();
+		const bookTitle = bookMetadata?.bookTitle || "manga";
+
+		//Track image metadata for EPUB generation.
+		const imageMetadata = [];
+
+		const maxImages = DEBUG_MODE ? Math.min(DEBUG_MAX_IMAGES, imageUrls.length) : imageUrls.length;
+		if (DEBUG_MODE) {
+			progressModal.addStatus(`🐛 DEBUG MODE: Only downloading first ${maxImages} images`, "warning");
+			log.warning(`DEBUG MODE: Downloading only first ${maxImages} of ${imageUrls.length} images`);
+		}
+
+		//Download each image.
+		for (let i = 0; i < maxImages; i++) {
+			const { pageIndex, url, elementId, resourceType, spreadInfo } = imageUrls[i];
+
+			try {
+				const imgResponse = await fetch(url, {
+					mode: "cors",
+					cache: "no-cache",
+				});
+
+				if (!imgResponse.ok) {
+					progressModal.addStatus(`[ERROR] Image ${i + 1} failed: ${imgResponse.status}`, "error");
+					log.error(`Failed to download image ${i + 1}: ${imgResponse.status}`);
+					continue;
+				}
+
+				const blob = await imgResponse.blob();
+				const arrayBuffer = await blob.arrayBuffer();
+
+				//Debug logging for first image only.
+				if (i === 0) {
+					log.info(`DEBUG: Image ${i + 1}`);
+					log.info(`Resource type: ${resourceType || "unknown"}`);
+					logBytes(arrayBuffer, "Encrypted data (first 16 bytes)");
+				}
+
+				let finalData;
+				let imageFormat = "png";
+				try {
+					finalData = await decryptImage(arrayBuffer, karamelToken);
+
+					if (i === 0) {
+						logBytes(finalData, "Decrypted data (first 16 bytes)");
+					}
+
+					imageFormat = detectImageFormat(finalData);
+
+					if (i === 0) {
+						log.info(`Detected format: ${imageFormat}`);
+						log.info(`END DEBUG`);
+					}
+
+					if (imageFormat === "unknown") {
+						progressModal.addStatus(`❌ Image ${i + 1} unknown format`, "error");
+						log.error(`Image ${i + 1} decryption produced unknown format`);
+						logBytes(finalData, `  Unknown format bytes (image ${i + 1})`);
+						continue;
+					}
+				} catch (decryptError) {
+					progressModal.addStatus(`❌ Decryption failed for image ${i + 1}`, "error");
+					log.error(`Failed to decrypt image ${i + 1}:`, decryptError);
+					continue;
+				}
+
+				//Use sequential numbering since array is already sorted.
+				const sequentialNumber = i + 1;
+				const filename = `page_${String(sequentialNumber).padStart(3, "0")}.${imageFormat}`;
+
+				//For EPUB, store images in OEBPS/Images/ subfolder from the start.
+				//For ZIP/CBZ, store at root level.
+				const storagePath = archiveFormat === "epub" ? `OEBPS/Images/${filename}` : filename;
+				zip.file(storagePath, finalData);
+
+				//Track metadata for EPUB generation (need extension and spread info)
+				//Recalculate spread info based on sequential index, not original sparse pageIndex.
+				const sequentialSpreadInfo = inferSpreadInfo(i);
+				imageMetadata.push({
+					filename: filename,
+					extension: imageFormat,
+					originalPageIndex: pageIndex,
+					spreadInfo: sequentialSpreadInfo,
+				});
+				progressModal.updateProgress("🖼️  Downloading Images", i + 1, maxImages, (i + 1) % 10 === 0 ? `✅ ${filename} (${(finalData.byteLength / 1024).toFixed(1)} KB)` : null);
+
+				log.okay(`Downloaded: ${filename}`);
+			} catch (error) {
+				progressModal.addStatus(`❌ Error on image ${i + 1}`, "error");
+				log.error(`Error downloading image ${i + 1}:`, error);
+			}
+		}
+
+		//Generate and download ZIP/CBZ/EPUB
+		let finalZip = zip;
+
+		const fileCount = Object.keys(finalZip.files).length;
+		let archiveType = archiveFormat.toUpperCase();
+
+		//If CBZ format is selected prepare the data for CBZ formatting with ComicInfo.xml.
+		if (archiveFormat === "cbz") {
+			try {
+				log.info("Starting CBZ conversion...");
+				finalZip = await generateCBZ(finalZip, imageMetadata);
+				log.okay("CBZ conversion completed successfully");
+			} catch (cbzError) {
+				log.error("CBZ conversion failed, falling back to ZIP:", cbzError);
+				progressModal.addStatus(`⚠️ CBZ conversion failed, using ZIP format instead`, "warning");
+			}
+		} else if (archiveFormat === "epub") {
+			try {
+				log.info("Starting EPUB conversion...");
+				finalZip = await generateEPUB(finalZip, imageMetadata);
+				log.okay("EPUB conversion completed successfully");
+				archiveType = "ZIP";
+			} catch (epubError) {
+				log.error("EPUB conversion failed, falling back to ZIP:", epubError);
+				progressModal.addStatus(`⚠️ EPUB conversion failed, using ZIP format instead`, "warning");
+				archiveType = "ZIP";
+			}
+		}
+
+		progressModal.addStatus(`📦 Creating ${archiveType} with ${fileCount} files...`, "info");
+		log.info(`Creating ${archiveType} file with ${fileCount} files...`);
+
+		try {
+			const zipBlob = await finalZip.generateAsync(
+				{
+					type: "blob",
+					compression: "STORE",
+				},
+				(zipMetadata) => {
+					const percent = zipMetadata.percent.toFixed(1);
+					if (zipMetadata.percent % 10 < 1) {
+						progressModal.updateProgress("📦 Creating Archive", Math.round(zipMetadata.percent), 100, `Processing: ${zipMetadata.currentFile || "finalizing"}`);
+					}
+					log.info(`ZIP progress: ${percent}% - ${zipMetadata.currentFile || "processing"}`);
+				},
+			);
+
+			progressModal.addStatus(`✅ ${archiveType} created: ${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`, "success");
+			log.okay(`${archiveType} file created: ${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`);
+
+			const zipUrl = URL.createObjectURL(zipBlob);
+			const a = document.createElement("a");
+			a.href = zipUrl;
+			a.download = `${sanitizeFilename(bookTitle)}.${archiveFormat}`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(zipUrl);
+
+			progressModal.addStatus(`🎉 Download complete!`, "success");
+			log.okay("Download complete!");
+
+			setTimeout(() => {
+				progressModal.close();
+				showModal("✅ Download Complete", `Successfully downloaded ${fileCount} images!\nFormat: ${archiveType}\nFile: ${sanitizeFilename(bookTitle)}.${archiveFormat}`, [
+					{ text: "OK", type: "primary" },
+				]);
+			}, 2000);
+		} catch (zipError) {
+			progressModal.addStatus(`❌ ZIP generation failed`, "error");
+			log.error("ZIP generation failed:", zipError);
+			progressModal.close();
+			showModal("❌ ZIP Generation Failed", `Error: ${zipError.message}`, [{ text: "OK", type: "primary" }]);
+			throw zipError;
+		}
+	}
+
+	/**
+	 * Infer spread information for a page based on its position and reading direction.
+	 * Manga typically displays:
+	 * - Cover page alone (spread-none)
+	 * - Interior pages in pairs (odd/even)
+	 * - RTL: right page first (odd), left page second (even)
+	 * - LTR: left page first (odd), right page second (even)
+	 *
+	 * @param {number} pageIndex The index of the page (0-based).
+	 * @returns {Object} Spread info with spread and pageSpread properties.
+	 */
+	function inferSpreadInfo(pageIndex) {
+		//Cover page should not be in a spread
+		if (pageIndex === bookCoverPosition) {
+			return {
+				spread: "none",
+				pageSpread: null,
+			};
+		}
+
+		//For manga pages after the cover:
+		//In RTL: odd-indexed pages are RIGHT, even-indexed pages are LEFT
+		//In LTR: odd-indexed pages are LEFT, even-indexed pages are RIGHT
+		let pageSpread;
+		if (bookIsRTL) {
+			//RTL manga: page 1 is right, page 2 is left, page 3 is right, etc.
+			pageSpread = pageIndex % 2 === 1 ? "right" : "left";
+		} else {
+			//LTR: page 1 is left, page 2 is right, page 3 is left, etc.
+			pageSpread = pageIndex % 2 === 1 ? "left" : "right";
+		}
+
+		return {
+			spread: "auto", //Let reader decide, but provide page-spread hints
+			pageSpread: pageSpread,
+		};
+	}
+
+	/**
+	 * Decrypt encrypted image using AES-GCM.
+	 *
+	 * @param {ArrayBuffer} encryptedArrayBuffer - The encrypted image data.
+	 * @param {Object} karamelToken - The Karamel token containing the key and expiration.
+	 * @returns {Promise<ArrayBuffer>} The decrypted image data.
+	 * @throws Will throw an error if decryption fails or if the token is invalid.
+	 */
+	async function decryptImage(encryptedArrayBuffer, karamelToken) {
+		try {
+			//Step 1: Extract 40-character key from token
+			//Key location = token.substring(expiresAt % 60, (expiresAt % 60) + 40)
+			if (!karamelToken || !karamelToken.token || !karamelToken.expiresAt) {
+				throw new Error("Invalid karamel token for decryption");
+			}
+
+			if (karamelToken.token.length < 100) {
+				throw new Error("Token too short for key extraction");
+			}
+
+			const offset = karamelToken.expiresAt % 60;
+			const keyString = karamelToken.token.substring(offset, offset + 40);
+
+			//Step 2: Parse encrypted data structure
+			//Format: [salt(24 base64)][IV(24 base64)][encrypted data(rest, base64)]
+			const decoder = new TextDecoder("utf-8");
+			const encodedText = decoder.decode(encryptedArrayBuffer);
+
+			const saltB64 = encodedText.substring(0, 24);
+			const ivB64 = encodedText.substring(24, 48);
+			const encryptedDataB64 = encodedText.substring(48);
+
+			//Step 3: Decode base64 components
+			const salt = base64ToArrayBuffer(saltB64);
+			const iv = base64ToArrayBuffer(ivB64);
+			const encryptedData = base64ToArrayBuffer(encryptedDataB64);
+
+			//Step 4: Import raw key for PBKDF2
+			const encoder = new TextEncoder();
+			const rawKey = await window.crypto.subtle.importKey("raw", encoder.encode(keyString), { name: "PBKDF2" }, false, ["deriveKey"]);
+
+			//Step 5: Derive AES-GCM key using PBKDF2
+			const aesKey = await window.crypto.subtle.deriveKey(
+				{
+					name: "PBKDF2",
+					salt: salt,
+					iterations: 1000,
+					hash: "SHA-256",
+				},
+				rawKey,
+				{ name: "AES-GCM", length: 128 },
+				false,
+				["decrypt"],
+			);
+
+			//Step 6: Decrypt using AES-GCM
+			const decryptedData = await window.crypto.subtle.decrypt(
+				{
+					name: "AES-GCM",
+					iv: iv,
+					additionalData: encoder.encode(keyString.slice(0, 9)), //First 9 chars as AAD
+					tagLength: 128,
+				},
+				aesKey,
+				encryptedData,
+			);
+
+			return decryptedData;
+		} catch (error) {
+			log.error("Decryption failed:", error);
+			throw error;
+		}
+	}
+
+	/********************************************************************/
+	/* CBZ Format                                                       */
+	/********************************************************************/
+
+	/**
+	 * Generate CBZ (Comic Book Archive) format from a ZIP containing images.
+	 * CBZ is essentially a ZIP file with:
+	 * - ComicInfo.xml metadata at the root
+	 * - Images with sequential naming (page_001.ext, page_002.ext, etc.)
+	 *
+	 * Images are already sequentially named and in the correct location during download,
+	 * so we just add ComicInfo.xml to the existing ZIP.
+	 *
+	 * @param {JSZip} sourceZip The source ZIP containing sequentially named images.
+	 * @param {Array} imageMetadata Array of image metadata objects.
+	 * @returns {Promise<JSZip>} The source ZIP with ComicInfo.xml added.
+	 */
+	async function generateCBZ(sourceZip, imageMetadata) {
+		try {
+			log.info("Generating CBZ format...");
+			progressModal.addStatus("📚 Converting to CBZ format...", "info");
+
+			//Images are already correctly named and positioned, just add ComicInfo.xml
+			try {
+				const comicInfoXML = generateComicInfoXML(imageMetadata.length);
+				sourceZip.file("ComicInfo.xml", comicInfoXML);
+				log.okay(`CBZ: ComicInfo.xml generated (${comicInfoXML.length} bytes)`);
+				progressModal.addStatus("✅ Added ComicInfo.xml metadata", "success");
+			} catch (xmlError) {
+				log.error("CBZ: Failed to generate ComicInfo.xml:", xmlError);
+				progressModal.addStatus("⚠️ Failed to generate ComicInfo.xml", "warning");
+				//Continue anyway, CBZ will work without it.
+			}
+
+			log.okay("CBZ: Format ready");
+			return sourceZip;
+		} catch (error) {
+			log.error("CBZ: Generation failed:", error);
+			progressModal.addStatus(`❌ CBZ generation failed: ${error.message}`, "error");
+			throw error;
+		}
+	}
+
+	/**
 	 * Generate ComicInfo.xml metadata for CBZ format.
 	 * This XML file contains metadata about the comic/manga according to the ComicInfo schema.
 	 *
@@ -1217,95 +1610,78 @@
 		return xml;
 	}
 
+	/********************************************************************/
+	/* EPUB Format                                                      */
+	/********************************************************************/
+
 	/**
-	 * Generate CBZ (Comic Book Archive) format from a ZIP containing images.
-	 * CBZ is essentially a ZIP file with:
-	 * - ComicInfo.xml metadata at the root
-	 * - Images with sequential naming (page_001.ext, page_002.ext, etc.)
+	 * Generate EPUB format from a ZIP containing images.
+	 * EPUB is a standardized e-book format with proper structure and metadata.
 	 *
-	 * @param {JSZip} sourceZip The source ZIP containing images with original filenames.
-	 * @returns {Promise<JSZip>} A new JSZip instance formatted as CBZ.
+	 * Images are already in OEBPS/Images/ from download step, so we just add
+	 * the EPUB metadata and structure files.
+	 *
+	 * @param {JSZip} sourceZip The source ZIP with images already in OEBPS/Images/.
+	 * @param {Array} imageMetadata Array of image metadata objects.
+	 * @returns {Promise<JSZip>} The source ZIP with EPUB structure added.
 	 */
-	async function generateCBZ(sourceZip) {
+	async function generateEPUB(sourceZip, imageMetadata) {
 		try {
-			log.info("Generating CBZ format...");
-			progressModal.addStatus("📚 Converting to CBZ format...", "info");
+			log.info("Generating EPUB format...");
+			progressModal.addStatus("📖 Converting to EPUB format...", "info");
 
-			//Create a new ZIP for CBZ.
-			const cbzZip = new JSZip();
-
-			//Step 1: Extract and sort images from source ZIP.
-			const imageFiles = [];
-			const fileNames = Object.keys(sourceZip.files);
-
-			log.info(`CBZ: Found ${fileNames.length} files in source ZIP`);
-
-			for (const fileName of fileNames) {
-				const file = sourceZip.files[fileName];
-				if (!file.dir) {
-					//Extract pageIndex from filename (format: page_XXX_elementId.ext)
-					const match = fileName.match(/page_(\d+)_.*\.(png|jpg|jpeg|webp|gif)$/i);
-					if (match) {
-						try {
-							const pageIndex = parseInt(match[1], 10);
-							const extension = match[2].toLowerCase();
-							const data = await file.async("arraybuffer");
-
-							imageFiles.push({
-								pageIndex: pageIndex,
-								extension: extension,
-								data: data,
-								originalName: fileName,
-							});
-							log.info(`CBZ: Extracted ${fileName}`);
-						} catch (extractError) {
-							log.error(`CBZ: Failed to extract ${fileName}:`, extractError);
-							progressModal.addStatus(`⚠️ Failed to extract ${fileName}`, "warning");
-						}
-					} else {
-						log.warning(`CBZ: Skipping non-image file: ${fileName}`);
-					}
-				}
+			if (imageMetadata.length === 0) {
+				throw new Error("No image metadata available for EPUB generation");
 			}
 
-			if (imageFiles.length === 0) {
-				throw new Error("No valid image files found in source ZIP");
-			}
+			log.info(`EPUB: Processing ${imageMetadata.length} images from metadata`);
+			progressModal.addStatus(`📄 Processing ${imageMetadata.length} images...`, "info");
 
-			//Sort by pageIndex to ensure correct reading order.
-			imageFiles.sort((a, b) => a.pageIndex - b.pageIndex);
+			//Step 1: Add mimetype file (MUST be first, MUST be uncompressed)
+			sourceZip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+			log.okay("EPUB: Added mimetype");
 
-			log.info(`CBZ: Processing ${imageFiles.length} images`);
+			//Step 2: Add META-INF/container.xml
+			sourceZip.file("META-INF/container.xml", generateContainerXML());
+			log.okay("EPUB: Added container.xml");
 
-			//Step 2: Add images with sequential naming.
-			imageFiles.forEach((img, index) => {
-				const sequentialNumber = index + 1;
-				const newFileName = `page_${String(sequentialNumber).padStart(3, "0")}.${img.extension}`;
-				cbzZip.file(newFileName, img.data);
-				log.info(`CBZ: Added ${newFileName} (from ${img.originalName})`);
+			//Step 3: Generate XHTML pages for each image
+			imageMetadata.forEach((img, index) => {
+				const pageNum = index + 1;
+				const xhtmlFile = `page${String(pageNum).padStart(3, "0")}.xhtml`;
+				const xhtml = generatePageXHTML(pageNum, img.filename);
+				sourceZip.file(`OEBPS/Text/${xhtmlFile}`, xhtml);
 			});
 
-			progressModal.addStatus(`✅ Renamed ${imageFiles.length} images sequentially`, "success");
-			log.okay(`CBZ: Added ${imageFiles.length} images with sequential naming`);
+			progressModal.addStatus(`✅ Generated ${imageMetadata.length} XHTML pages`, "success");
+			log.okay(`EPUB: Generated ${imageMetadata.length} XHTML pages`);
 
-			//Step 3: Generate and add ComicInfo.xml.
-			try {
-				const comicInfoXML = generateComicInfoXML(imageFiles.length);
-				cbzZip.file("ComicInfo.xml", comicInfoXML);
-				log.okay(`CBZ: ComicInfo.xml generated (${comicInfoXML.length} bytes)`);
-			} catch (xmlError) {
-				log.error("CBZ: Failed to generate ComicInfo.xml:", xmlError);
-				progressModal.addStatus("⚠️ Failed to generate ComicInfo.xml", "warning");
-				// Continue anyway, CBZ will work without it
-			}
+			//Step 4: Add CSS stylesheet
+			sourceZip.file("OEBPS/Styles/style.css", generateEPUBCSS());
+			log.okay("EPUB: Added stylesheet");
 
-			progressModal.addStatus("✅ Added ComicInfo.xml metadata", "success");
-			log.okay("CBZ: Added ComicInfo.xml");
+			//Step 5: Generate and add content.opf (use imageMetadata directly)
+			const contentOPF = generateContentOPF(imageMetadata);
+			sourceZip.file("OEBPS/content.opf", contentOPF);
+			log.okay("EPUB: Added content.opf");
 
-			return cbzZip;
+			//Step 6: Generate and add nav.xhtml (EPUB 3 Navigation Document)
+			const navXHTML = generateNavXHTML(imageMetadata);
+			sourceZip.file("OEBPS/nav.xhtml", navXHTML);
+			log.okay("EPUB: Added nav.xhtml");
+
+			//Step 7: Generate and add toc.ncx (EPUB 2.0 compatibility)
+			const tocNCX = generateTocNCX(imageMetadata);
+			sourceZip.file("OEBPS/toc.ncx", tocNCX);
+			log.okay("EPUB: Added toc.ncx");
+
+			progressModal.addStatus("✅ EPUB structure complete", "success");
+			log.okay("EPUB: Format ready");
+
+			return sourceZip;
 		} catch (error) {
-			log.error("CBZ: Generation failed:", error);
-			progressModal.addStatus(`❌ CBZ generation failed: ${error.message}`, "error");
+			log.error("EPUB: Generation failed:", error);
+			progressModal.addStatus(`❌ EPUB generation failed: ${error.message}`, "error");
 			throw error;
 		}
 	}
@@ -1387,6 +1763,7 @@
 		opf += `
 	</metadata>
 	<manifest>
+		<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
 		<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
 		<item id="style" href="Styles/style.css" media-type="text/css"/>`;
 
@@ -1417,7 +1794,7 @@
 
 		opf += `
 	</manifest>
-	<spine toc="ncx">`;
+	<spine toc="ncx" page-progression-direction="${bookIsRTL ? "rtl" : "ltr"}">`;
 
 		//Add all pages to spine (reading order) with spread properties
 		const pagesWithSpread = imageFiles.filter((img) => img.spreadInfo && (img.spreadInfo.spread || img.spreadInfo.pageSpread)).length;
@@ -1470,6 +1847,74 @@
 </package>`;
 
 		return opf;
+	}
+
+	/**
+	 * Generate nav.xhtml for EPUB format.
+	 * This is the navigation document required by EPUB 3 specification.
+	 *
+	 * @param {Array} imageFiles Array of image file objects.
+	 * @returns {string} The nav.xhtml content.
+	 */
+	function generateNavXHTML(imageFiles) {
+		/**
+		 * Escape XML special characters.
+		 * @param {string} str The string to escape.
+		 * @returns {string} The escaped string.
+		 */
+		function escapeXML(str) {
+			if (!str) return "";
+			return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+		}
+
+		const title = escapeXML(bookMetadata.bookTitle || "Unknown Title");
+
+		let nav = `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${escapeXML(bookLanguage)}" xml:lang="${escapeXML(bookLanguage)}">
+<head>
+	<meta charset="UTF-8"/>
+	<title>${title}</title>
+	<link rel="stylesheet" type="text/css" href="Styles/style.css"/>
+</head>
+<body>
+	<nav epub:type="toc" id="toc">
+		<h1>Table of Contents</h1>
+		<ol>`;
+
+		//For manga without chapter info, create a single entry pointing to first page
+		if (!bookToc || bookToc.length === 0) {
+			nav += `
+			<li><a href="Text/page001.xhtml">Start</a></li>`;
+		} else {
+			//Add chapter entries if TOC is available
+			bookToc.forEach((chapter, index) => {
+				const playOrder = index + 1;
+				const chapterTitle = escapeXML(chapter.label || chapter.title || `Chapter ${playOrder}`);
+
+				//Map chapter position to actual page number
+				let pageNum = playOrder; //Fallback: use sequential numbering
+
+				if (chapter.tocPositionId !== undefined) {
+					//Find the image whose pageIndex matches the chapter's starting position
+					const matchingImageIndex = imageFiles.findIndex((img) => img.pageIndex === chapter.tocPositionId);
+					if (matchingImageIndex !== -1) {
+						pageNum = matchingImageIndex + 1; //1-based page number
+					}
+				}
+
+				const pageFile = `page${String(pageNum).padStart(3, "0")}.xhtml`;
+				nav += `
+			<li><a href="Text/${pageFile}">${chapterTitle}</a></li>`;
+			});
+		}
+
+		nav += `
+		</ol>
+	</nav>
+</body>
+</html>`;
+
+		return nav;
 	}
 
 	/**
@@ -1608,514 +2053,40 @@ img {
 `;
 	}
 
+	/********************************************************************/
+	/* Helpers                                                          */
+	/********************************************************************/
+
 	/**
-	 * Generate EPUB format from a ZIP containing images.
-	 * EPUB is a standardized e-book format with proper structure and metadata.
+	 * Parse a TAR response and extract JSON files.
+	 * This function uses the js-untar library to parse the TAR file and extracts JSON content from the files.
+	 * It skips any PaxHeaders (metadata files) and returns a map of file names to their parsed JSON content.
 	 *
-	 * @param {JSZip} sourceZip The source ZIP containing images.
-	 * @returns {Promise<JSZip>} A new JSZip instance formatted as EPUB.
+	 * @param {ArrayBuffer} arrayBuffer The TAR response as an ArrayBuffer.
+	 * @returns {Promise<Object>} A map of file names to parsed JSON objects.
 	 */
-	async function generateEPUB(sourceZip) {
+	async function parseTarResponse(arrayBuffer) {
 		try {
-			log.info("Generating EPUB format...");
-			progressModal.addStatus("📖 Converting to EPUB format...", "info");
+			const files = await untar(arrayBuffer);
+			const fileMap = {};
 
-			const epubZip = new JSZip();
-
-			//Step 1: Extract and sort images from source ZIP
-			const imageFiles = [];
-			const fileNames = Object.keys(sourceZip.files);
-
-			log.info(`EPUB: Found ${fileNames.length} files in source ZIP`);
-
-			for (const fileName of fileNames) {
-				const file = sourceZip.files[fileName];
-				if (!file.dir) {
-					//Extract pageIndex from filename (format: page_XXX_elementId.ext)
-					const match = fileName.match(/page_(\d+)_.*\.(png|jpg|jpeg|webp|gif)$/i);
-					if (match) {
-						try {
-							const pageIndex = parseInt(match[1], 10);
-							const extension = match[2].toLowerCase();
-							const data = await file.async("arraybuffer");
-
-							imageFiles.push({
-								pageIndex: pageIndex,
-								extension: extension,
-								data: data,
-								originalName: fileName,
-							});
-							log.info(`EPUB: Extracted ${fileName}`);
-						} catch (extractError) {
-							log.error(`EPUB: Failed to extract ${fileName}:`, extractError);
-							progressModal.addStatus(`⚠️ Failed to extract ${fileName}`, "warning");
-						}
-					}
-				}
-			}
-
-			if (imageFiles.length === 0) {
-				throw new Error("No valid image files found in source ZIP");
-			}
-
-			//Sort by pageIndex
-			imageFiles.sort((a, b) => a.pageIndex - b.pageIndex);
-
-			log.info(`EPUB: Processing ${imageFiles.length} images`);
-			progressModal.addStatus(`📄 Processing ${imageFiles.length} images...`, "info");
-
-			//Step 2: Add mimetype file (MUST be first, MUST be uncompressed)
-			epubZip.file("mimetype", "application/epub+zip", { compression: "STORE" });
-			log.okay("EPUB: Added mimetype");
-
-			//Step 3: Add META-INF/container.xml
-			epubZip.file("META-INF/container.xml", generateContainerXML());
-			log.okay("EPUB: Added container.xml");
-
-			//Step 4: Add images with sequential naming in OEBPS/Images/
-			const processedImages = [];
-			imageFiles.forEach((img, index) => {
-				const sequentialNumber = index + 1;
-				const newFileName = `page_${String(sequentialNumber).padStart(3, "0")}.${img.extension}`;
-				epubZip.file(`OEBPS/Images/${newFileName}`, img.data);
-
-				// Recalculate spread info based on SEQUENTIAL index in EPUB, not original sparse pageIndex
-				// This ensures correct left/right assignment after deduplication
-				const sequentialSpreadInfo = inferSpreadInfo(index);
-
-				processedImages.push({
-					filename: newFileName,
-					extension: img.extension,
-					pageIndex: img.pageIndex,
-					spreadInfo: sequentialSpreadInfo,
-				});
-				log.info(`EPUB: Added image ${newFileName}`);
-			});
-
-			progressModal.addStatus(`✅ Added ${imageFiles.length} images`, "success");
-
-			//Step 5: Generate XHTML pages for each image
-			processedImages.forEach((img, index) => {
-				const pageNum = index + 1;
-				const xhtmlFile = `page${String(pageNum).padStart(3, "0")}.xhtml`;
-				const xhtml = generatePageXHTML(pageNum, img.filename);
-				epubZip.file(`OEBPS/Text/${xhtmlFile}`, xhtml);
-			});
-
-			progressModal.addStatus(`✅ Generated ${processedImages.length} XHTML pages`, "success");
-			log.okay(`EPUB: Generated ${processedImages.length} XHTML pages`);
-
-			//Step 6: Add CSS stylesheet
-			epubZip.file("OEBPS/Styles/style.css", generateEPUBCSS());
-			log.okay("EPUB: Added stylesheet");
-
-			//Step 7: Generate and add content.opf
-			const contentOPF = generateContentOPF(processedImages);
-			epubZip.file("OEBPS/content.opf", contentOPF);
-			log.okay("EPUB: Added content.opf");
-
-			//Step 8: Generate and add toc.ncx
-			const tocNCX = generateTocNCX(processedImages);
-			epubZip.file("OEBPS/toc.ncx", tocNCX);
-			log.okay("EPUB: Added toc.ncx");
-
-			progressModal.addStatus("✅ EPUB structure complete", "success");
-			log.okay("EPUB: Format ready");
-
-			return epubZip;
-		} catch (error) {
-			log.error("EPUB: Generation failed:", error);
-			progressModal.addStatus(`❌ EPUB generation failed: ${error.message}`, "error");
-			throw error;
-		}
-	}
-
-	/**
-	 * Infer spread information for a page based on its position and reading direction.
-	 * Manga typically displays:
-	 * - Cover page alone (spread-none)
-	 * - Interior pages in pairs (odd/even)
-	 * - RTL: right page first (odd), left page second (even)
-	 * - LTR: left page first (odd), right page second (even)
-	 *
-	 * @param {number} pageIndex The index of the page (0-based).
-	 * @returns {Object} Spread info with spread and pageSpread properties.
-	 */
-	function inferSpreadInfo(pageIndex) {
-		//Cover page should not be in a spread
-		if (pageIndex === bookCoverPosition) {
-			return {
-				spread: "none",
-				pageSpread: null,
-			};
-		}
-
-		//For manga pages after the cover:
-		//In RTL: odd-indexed pages are RIGHT, even-indexed pages are LEFT
-		//In LTR: odd-indexed pages are LEFT, even-indexed pages are RIGHT
-		let pageSpread;
-		if (bookIsRTL) {
-			//RTL manga: page 1 is right, page 2 is left, page 3 is right, etc.
-			pageSpread = pageIndex % 2 === 1 ? "right" : "left";
-		} else {
-			//LTR: page 1 is left, page 2 is right, page 3 is left, etc.
-			pageSpread = pageIndex % 2 === 1 ? "left" : "right";
-		}
-
-		return {
-			spread: "auto", //Let reader decide, but provide page-spread hints
-			pageSpread: pageSpread,
-		};
-	}
-
-	/**
-	 * Download images from the CDN based on the manifest and page data.
-	 * This function extracts image references from the page data, maps them to CDN URLs using the manifest,
-	 * and downloads each image while updating the progress modal.
-	 *
-	 * @param {Object} manifest The manifest containing CDN resources and authentication info.
-	 * @param {Array} pageData The array of page data objects.
-	 * @param {Object} karamelToken The Karamel token for authentication.
-	 * @param {string} format The output format ('zip', 'cbz', or 'epub').
-	 * @returns {Promise<void>}
-	 */
-	async function downloadImages(manifest, pageData, karamelToken, format = "zip") {
-		if (!manifest || !manifest.cdnResources || !manifest.cdn) {
-			log.error("Invalid manifest data");
-			return;
-		}
-
-		const { baseUrl, authParameter } = manifest.cdn;
-		const resourceMap = {};
-
-		//Create a map of resource references to URLs
-		manifest.cdnResources.forEach((resource) => {
-			const resourceId = resource.url.split("/")[1];
-			resourceMap[resource.url] = {
-				url: `${baseUrl}/${resource.url}`,
-				type: resource.type,
-			};
-		});
-
-		log.info("Resource Map:", resourceMap);
-
-		//Use script-scoped RTL and cover position values set in downloadBook
-		log.info(`Reading direction: ${bookIsRTL ? "RTL" : "LTR"}, Cover position: ${bookCoverPosition}`);
-
-		//Extract image references and infer spread metadata from page data
-		//Use a Map to deduplicate images by elementId (same image may appear on multiple pages)
-		const imageMap = new Map();
-		pageData.forEach((page) => {
-			if (page.children) {
-				page.children.forEach((child) => {
-					if (child.imageReference && child.elementId) {
-						//Skip if we've already seen this image
-						if (imageMap.has(child.elementId)) {
-							return;
-						}
-
-						const resource = resourceMap[child.imageReference];
-						if (resource) {
-							//Build full URL with auth parameters from manifest AND karamel token
-							let imageUrl = `${resource.url}?${authParameter}`;
-
-							//Add token and expiration from karamelToken
-							if (karamelToken && karamelToken.token) {
-								imageUrl += `&token=${encodeURIComponent(karamelToken.token)}`;
-							}
-							if (karamelToken && karamelToken.expiresAt) {
-								imageUrl += `&expiration=${karamelToken.expiresAt}`;
-							}
-
-							//Infer page spread metadata for EPUB generation
-							//Since Kindle API doesn't provide explicit spread properties,
-							//we infer them based on page position and reading direction
-							const spreadInfo = inferSpreadInfo(page.pageIndex);
-
-							//Store unique image by elementId
-							imageMap.set(child.elementId, {
-								pageIndex: page.pageIndex,
-								url: imageUrl,
-								elementId: child.elementId,
-								resourceType: resource.type,
-								spreadInfo: spreadInfo,
-							});
-						}
-					}
-				});
-			}
-		});
-
-		//Convert Map to array and sort by pageIndex to maintain correct order
-		const imageUrls = Array.from(imageMap.values()).sort((a, b) => a.pageIndex - b.pageIndex);
-
-		//Log deduplication info
-		log.info(`Found ${imageUrls.length} unique images to download`);
-
-		//Log spread info for debugging (only for first few pages)
-		imageUrls.slice(0, 5).forEach((img) => {
-			log.info(`Page ${img.pageIndex} (element ${img.elementId}) spread info:`, img.spreadInfo);
-		});
-
-		progressModal.addStatus(`🖼️  Found ${imageUrls.length} images to download`, "info");
-		log.info(`Found ${imageUrls.length} images to download`);
-
-		//Create a mapping of pageIndex to spread metadata for EPUB generation
-		const pageSpreadMetadata = {};
-		imageUrls.forEach((imgUrl) => {
-			if (imgUrl.spreadInfo && (imgUrl.spreadInfo.spread || imgUrl.spreadInfo.pageSpread)) {
-				pageSpreadMetadata[imgUrl.pageIndex] = imgUrl.spreadInfo;
-			}
-		});
-
-		if (Object.keys(pageSpreadMetadata).length > 0) {
-			log.info(`Found spread metadata for ${Object.keys(pageSpreadMetadata).length} pages`);
-		}
-
-		const zip = new JSZip();
-		const bookTitle = bookMetadata?.bookTitle || "manga";
-
-		const maxImages = DEBUG_MODE ? Math.min(DEBUG_MAX_IMAGES, imageUrls.length) : imageUrls.length;
-		if (DEBUG_MODE) {
-			progressModal.addStatus(`🐛 DEBUG MODE: Only downloading first ${maxImages} images`, "warning");
-			log.warning(`DEBUG MODE: Downloading only first ${maxImages} of ${imageUrls.length} images`);
-		}
-
-		//Download each image
-		for (let i = 0; i < maxImages; i++) {
-			const { pageIndex, url, elementId, resourceType, spreadInfo } = imageUrls[i];
-
-			try {
-				const imgResponse = await fetch(url, {
-					mode: "cors",
-					cache: "no-cache",
-				});
-
-				if (!imgResponse.ok) {
-					progressModal.addStatus(`[ERROR] Image ${i + 1} failed: ${imgResponse.status}`, "error");
-					log.error(`Failed to download image ${i + 1}: ${imgResponse.status}`);
+			for (const file of files) {
+				//Skip PaxHeaders (metadata files)
+				if (file.name.includes("PaxHeaders")) {
 					continue;
 				}
 
-				const blob = await imgResponse.blob();
-				const arrayBuffer = await blob.arrayBuffer();
-
-				//Debug logging for first image only
-				if (i === 0) {
-					log.info(`DEBUG: Image ${i + 1}`);
-					log.info(`Resource type: ${resourceType || "unknown"}`);
-					logBytes(arrayBuffer, "Encrypted data (first 16 bytes)");
-				}
-
-				let finalData;
-				let imageFormat = "png";
-				try {
-					finalData = await decryptImage(arrayBuffer, karamelToken);
-
-					if (i === 0) {
-						logBytes(finalData, "Decrypted data (first 16 bytes)");
-					}
-
-					imageFormat = detectImageFormat(finalData);
-
-					if (i === 0) {
-						log.info(`Detected format: ${imageFormat}`);
-						log.info(`END DEBUG`);
-					}
-
-					if (imageFormat === "unknown") {
-						progressModal.addStatus(`❌ Image ${i + 1} unknown format`, "error");
-						log.error(`Image ${i + 1} decryption produced unknown format`);
-						logBytes(finalData, `  Unknown format bytes (image ${i + 1})`);
-						continue;
-					}
-				} catch (decryptError) {
-					progressModal.addStatus(`❌ Decryption failed for image ${i + 1}`, "error");
-					log.error(`Failed to decrypt image ${i + 1}:`, decryptError);
-					continue;
-				}
-
-				const filename = `page_${String(pageIndex).padStart(3, "0")}_${elementId}.${imageFormat}`;
-				zip.file(filename, finalData);
-
-				//Update progress
-				progressModal.updateProgress("🖼️  Downloading Images", i + 1, maxImages, (i + 1) % 10 === 0 ? `✅ ${filename} (${(finalData.byteLength / 1024).toFixed(1)} KB)` : null);
-
-				log.okay(`Downloaded: ${filename}`);
-			} catch (error) {
-				progressModal.addStatus(`❌ Error on image ${i + 1}`, "error");
-				log.error(`Error downloading image ${i + 1}:`, error);
-			}
-		}
-
-		//Generate and download ZIP/CBZ
-		let finalZip = zip;
-
-		const fileCount = Object.keys(finalZip.files).length;
-		let archiveType = format === "cbz" ? "CBZ" : format === "epub" ? "EPUB" : "ZIP";
-
-		//If CBZ format is selected prepare the data for CBZ formatting with ComicInfo.xml.
-		if (format === "cbz") {
-			try {
-				log.info("Starting CBZ conversion...");
-				finalZip = await generateCBZ(finalZip);
-				log.okay("CBZ conversion completed successfully");
-			} catch (cbzError) {
-				log.error("CBZ conversion failed, falling back to ZIP:", cbzError);
-				progressModal.addStatus(`⚠️ CBZ conversion failed, using ZIP format instead`, "warning");
-			}
-		} else if (format === "epub") {
-			try {
-				log.info("Starting EPUB conversion...");
-				finalZip = await generateEPUB(finalZip);
-				log.okay("EPUB conversion completed successfully");
-				archiveType = "ZIP";
-			} catch (epubError) {
-				log.error("EPUB conversion failed, falling back to ZIP:", epubError);
-				progressModal.addStatus(`⚠️ EPUB conversion failed, using ZIP format instead`, "warning");
-				archiveType = "ZIP";
-			}
-		}
-
-		progressModal.addStatus(`📦 Creating ${archiveType} with ${fileCount} files...`, "info");
-		log.info(`Creating ${archiveType} file with ${fileCount} files...`);
-
-		try {
-			const zipBlob = await finalZip.generateAsync(
-				{
-					type: "blob",
-					compression: "STORE",
-				},
-				(zipMetadata) => {
-					const percent = zipMetadata.percent.toFixed(1);
-					if (zipMetadata.percent % 10 < 1) {
-						progressModal.updateProgress("📦 Creating Archive", Math.round(zipMetadata.percent), 100, `Processing: ${zipMetadata.currentFile || "finalizing"}`);
-					}
-					log.info(`ZIP progress: ${percent}% - ${zipMetadata.currentFile || "processing"}`);
-				},
-			);
-
-			progressModal.addStatus(`✅ ${archiveType} created: ${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`, "success");
-			log.okay(`${archiveType} file created: ${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`);
-
-			//Determine file extension and format name
-			const fileExtension = format === "epub" ? "epub" : format === "cbz" ? "cbz" : "zip";
-			const formatName = format === "epub" ? "EPUB" : format === "cbz" ? "CBZ" : "ZIP";
-
-			const zipUrl = URL.createObjectURL(zipBlob);
-			const a = document.createElement("a");
-			a.href = zipUrl;
-			a.download = `${sanitizeFilename(bookTitle)}.${fileExtension}`;
-			document.body.appendChild(a);
-			a.click();
-			document.body.removeChild(a);
-			URL.revokeObjectURL(zipUrl);
-
-			progressModal.addStatus(`🎉 Download complete!`, "success");
-			log.okay("Download complete!");
-
-			setTimeout(() => {
-				progressModal.close();
-				showModal("✅ Download Complete", `Successfully downloaded ${fileCount} images!\nFormat: ${formatName}\nFile: ${sanitizeFilename(bookTitle)}.${fileExtension}`, [
-					{ text: "OK", type: "primary" },
-				]);
-			}, 2000);
-		} catch (zipError) {
-			progressModal.addStatus(`❌ ZIP generation failed`, "error");
-			log.error("ZIP generation failed:", zipError);
-			progressModal.close();
-			showModal("❌ ZIP Generation Failed", `Error: ${zipError.message}`, [{ text: "OK", type: "primary" }]);
-			throw zipError;
-		}
-	}
-
-	/**
-	 * Decrypt encrypted image using AES-GCM.
-	 *
-	 * @param {ArrayBuffer} encryptedArrayBuffer - The encrypted image data.
-	 * @param {Object} karamelToken - The Karamel token containing the key and expiration.
-	 * @returns {Promise<ArrayBuffer>} The decrypted image data.
-	 * @throws Will throw an error if decryption fails or if the token is invalid.
-	 */
-	async function decryptImage(encryptedArrayBuffer, karamelToken) {
-		try {
-			//Step 1: Extract 40-character key from token
-			//Key location = token.substring(expiresAt % 60, (expiresAt % 60) + 40)
-			if (!karamelToken || !karamelToken.token || !karamelToken.expiresAt) {
-				throw new Error("Invalid karamel token for decryption");
+				//Convert file blob to text for JSON files
+				const text = await file.blob.text();
+				fileMap[file.name] = JSON.parse(text);
+				log.info(`Parsed: ${file.name}`);
 			}
 
-			if (karamelToken.token.length < 100) {
-				throw new Error("Token too short for key extraction");
-			}
-
-			const offset = karamelToken.expiresAt % 60;
-			const keyString = karamelToken.token.substring(offset, offset + 40);
-
-			//Step 2: Parse encrypted data structure
-			//Format: [salt(24 base64)][IV(24 base64)][encrypted data(rest, base64)]
-			const decoder = new TextDecoder("utf-8");
-			const encodedText = decoder.decode(encryptedArrayBuffer);
-
-			const saltB64 = encodedText.substring(0, 24);
-			const ivB64 = encodedText.substring(24, 48);
-			const encryptedDataB64 = encodedText.substring(48);
-
-			//Step 3: Decode base64 components
-			const salt = base64ToArrayBuffer(saltB64);
-			const iv = base64ToArrayBuffer(ivB64);
-			const encryptedData = base64ToArrayBuffer(encryptedDataB64);
-
-			//Step 4: Import raw key for PBKDF2
-			const encoder = new TextEncoder();
-			const rawKey = await window.crypto.subtle.importKey("raw", encoder.encode(keyString), { name: "PBKDF2" }, false, ["deriveKey"]);
-
-			//Step 5: Derive AES-GCM key using PBKDF2
-			const aesKey = await window.crypto.subtle.deriveKey(
-				{
-					name: "PBKDF2",
-					salt: salt,
-					iterations: 1000,
-					hash: "SHA-256",
-				},
-				rawKey,
-				{ name: "AES-GCM", length: 128 },
-				false,
-				["decrypt"],
-			);
-
-			//Step 6: Decrypt using AES-GCM
-			const decryptedData = await window.crypto.subtle.decrypt(
-				{
-					name: "AES-GCM",
-					iv: iv,
-					additionalData: encoder.encode(keyString.slice(0, 9)), //First 9 chars as AAD
-					tagLength: 128,
-				},
-				aesKey,
-				encryptedData,
-			);
-
-			return decryptedData;
+			return fileMap;
 		} catch (error) {
-			log.error("Decryption failed:", error);
+			log.error("Error parsing TAR:", error);
 			throw error;
 		}
-	}
-
-	/**
-	 * Convert a base64 string to an ArrayBuffer.
-	 *
-	 * @param {string} base64 - The base64 string to convert.
-	 * @returns {ArrayBuffer} The resulting ArrayBuffer.
-	 */
-	function base64ToArrayBuffer(base64) {
-		const binaryString = atob(base64);
-		const bytes = new Uint8Array(binaryString.length);
-		for (let i = 0; i < binaryString.length; i++) {
-			bytes[i] = binaryString.charCodeAt(i);
-		}
-		return bytes.buffer;
 	}
 
 	/**
@@ -2177,6 +2148,37 @@ img {
 			.map((b) => b.toString(16).padStart(2, "0"))
 			.join(" ");
 		log.info(`${label}: ${hex} (${bytes.length} bytes total)`);
+	}
+
+	/**
+	 * Convert a base64 string to an ArrayBuffer.
+	 *
+	 * @param {string} base64 - The base64 string to convert.
+	 * @returns {ArrayBuffer} The resulting ArrayBuffer.
+	 */
+	function base64ToArrayBuffer(base64) {
+		const binaryString = atob(base64);
+		const bytes = new Uint8Array(binaryString.length);
+		for (let i = 0; i < binaryString.length; i++) {
+			bytes[i] = binaryString.charCodeAt(i);
+		}
+		return bytes.buffer;
+	}
+
+	/**
+	 * Get the current Amazon domain (either read.amazon.co.jp or read.amazon.com).
+	 * Returns null if not on a supported domain.
+	 *
+	 * @returns {string|null} The current Amazon domain or null if invalid.
+	 */
+	function getCurrentDomain() {
+		const hostname = window.location.hostname;
+		if (hostname === "read.amazon.co.jp") {
+			return "read.amazon.co.jp";
+		} else if (hostname === "read.amazon.com") {
+			return "read.amazon.com";
+		}
+		return null;
 	}
 
 	/**
