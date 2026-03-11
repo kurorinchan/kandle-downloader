@@ -1,17 +1,17 @@
 //==UserScript==
-//@name         Kindle Manga Downloader
-//@namespace    http://tampermonkey.net/
-//@version      0.1.0
-//@description  Download manga images from Amazon Kindle
-//@author       You
-//@match        https://read.amazon.co.jp/*
-//@match        https://read.amazon.com/*
-//@require      https://cdn.jsdelivr.net/npm/js-untar@2.0.0/build/dist/untar.min.js
-//@require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.9.1/jszip.min.js
-//@grant        GM_download
-//@grant        GM_xmlhttpRequest
-//@connect      cloudfront.net
-//@run-at       document-end
+// @name         Kindle Manga Downloader
+// @namespace    http://tampermonkey.net/
+// @version      0.1.0
+// @description  Download manga images from Amazon Kindle
+// @author       You
+// @match        https://read.amazon.co.jp/*
+// @match        https://read.amazon.com/*
+// @require      https://cdn.jsdelivr.net/npm/js-untar@2.0.0/build/dist/untar.min.js
+// @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.9.1/jszip.min.js
+// @grant        GM_download
+// @grant        GM_xmlhttpRequest
+// @connect      cloudfront.net
+// @run-at       document-end
 //==/UserScript==
 
 (function () {
@@ -583,7 +583,7 @@
 			warning.style.marginTop = "16px";
 			warning.style.color = "#aaa";
 			warning.style.fontSize = "12px";
-			warning.textContent = "This may take a few minutes. Continue?";
+			warning.textContent = "This may take a few minutes.  Continue?";
 			contentEl.appendChild(warning);
 
 			showModal("📖 Ready to Download", contentEl, [
