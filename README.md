@@ -1,6 +1,6 @@
 # Kandle Downloader
 
-A powerful Tampermonkey/Greasemonkey userscript that allows you to download Kindle Books(Manga only for the moment) from your own Amazon Kindle library through the Kindle web interface(`read.amazon.co.jp/.com`).  This tool extracts high quality images from Kindle Renderer API and packages them into ZIP archive, CBZ, and EPUB formats.  Additional support for book text(glyphs) is planned to be added in the future.
+Download your Kindle Books(Manga only for the moment) from your own Amazon Kindle library through the Kindle web interface(`read.amazon.co.jp/.com`) with this Tampermonkey/Greasemonkey userscript.  This tool extracts high quality images from Kindle Renderer API and packages them into ZIP archive, CBZ, and EPUB formats.  Additional support for book text(glyphs) is planned to be added in the future.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/Alexia/kandle-downloader)
