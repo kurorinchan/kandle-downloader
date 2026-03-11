@@ -1,9 +1,9 @@
-# Kindle Manga Downloader
+# Kandle Downloader
 
-A powerful Tampermonkey/Greasemonkey userscript that allows you to download manga images from your own Amazon Kindle library through the Kindle web interface(`read.amazon.co.jp/.com`).  This script extracts high-quality images from Kindle manga books and packages them into a convenient ZIP archive.
+A powerful Tampermonkey/Greasemonkey userscript that allows you to download Kindle Books(Manga only for the moment) from your own Amazon Kindle library through the Kindle web interface(`read.amazon.co.jp/.com`).  This tool extracts high quality images from Kindle Renderer API and packages them into ZIP archive, CBZ, and EPUB formats.  Additional support for book text(glyphs) is planned to be added in the future.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/Alexia/kindle-manga-downloader)
+[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/Alexia/kandle-downloader)
 
 ## Legal Notice
 
@@ -39,7 +39,7 @@ A powerful Tampermonkey/Greasemonkey userscript that allows you to download mang
 	- Follow the installation instructions for your browser.
 
 2. **Install the script**:
-	- Open the [the raw](https://raw.githubusercontent.com/Alexia/kindle-manga-downloader/refs/heads/master/kindle-manga-download.js) `kindle-manga-download.js` in your browser.
+	- Open the [the raw](https://raw.githubusercontent.com/Alexia/kandle-downloader/refs/heads/master/kandle-downloader.js) `kandle-downloader.js` in your browser.
 	- Your userscript manager should detect it and prompt you to install.
 		- This might not work with some user script extensions and you might have to manually install it.
 	- Click "Install" or "Confirm".
@@ -73,31 +73,33 @@ A powerful Tampermonkey/Greasemonkey userscript that allows you to download mang
 	- A progress modal will display:
 		- Page download progress
 		- Image download progress
-		- ZIP creation status
+		- ZIP/CBZ/EPUB creation status
 	- Wait for the download to complete (may take several minutes for large manga)
 
 5. **Access your files**:
-	- The ZIP file will be saved to your default downloads folder
+	- The ZIP file will be saved to your default downloads folder.
 	- Extract and enjoy your manga images!
 
 ## Technical Details
 
 ### How It Works
 
+The Kindle Wed Reader functionally does not have what most consider to be Digital Rights Management(DRM) technologies.  Everything needed to download from one's own library is there in plain text.
+
 1. **Authentication & Setup**:
 	- Extracts rendering token, ASIN, and revision information from the HTML.
-	- Obtains decryption tokens from the API.
 
 2. **Metadata Retrieval**:
 	- Fetches Table of Contents (TOC) via Amazon's `/renderer/render` API.
 	- Parses concatened TAR formatted responses containing JSON metadata.
-	- Extracts location map for pagination.
+	- Extracts location map data for pagination.
 
 3. **Page Downloads**:
 	- Iterates through all page positions and collects page metadata on what images and page contents to collect.
 
 4. **Image Processing**:
-	- Constructs authenticated CDN Cloudfront URLs and downloads encrypted image data then decrypts them using AES-GCM with PBKDF2 key derivation,
+	- Constructs authenticated CDN Cloudfront URLs.
+	- Downloads encrypted image data then decrypts them using AES-GCM with PBKDF2 key derivation.
 	- Detects image format (PNG/JPEG/WebP) and creates the correctly named file.
 
 5. **Archive Creation**:
@@ -110,6 +112,8 @@ Images are encrypted using:
 - **Key Derivation**: PBKDF2 with 1,000 iterations
 - **Hash Function**: SHA-256
 - **Format**: Base64-encoded salt (24 chars) + IV (24 chars) + encrypted data
+
+There are no special steps required to get the encryption keys.  The keys are delivered with the image data prepended as a base64 encoded string.
 
 ### Supported Domains
 
@@ -134,15 +138,6 @@ const DEBUG_MODE = true;              // Enable/disable debug mode
 const DEBUG_MAX_PAGE_REQUESTS = 3;    // Limit page requests
 const DEBUG_MAX_IMAGES = 10;          // Limit image downloads
 ```
-
-### Customization
-
-You can modify various parameters in the script:
-
-- **Viewport dimensions**: `width`, `height`, `dpi`
-- **Font settings**: `fontFamily`, `fontSize`, `lineHeight`
-- **Theme**: `dark` (current) or `light`
-- **Request delay**: Adjust `setTimeout` value (default: 100ms)
 
 ## Troubleshooting
 
@@ -179,7 +174,7 @@ AI assisted and developed contributions are okay, but they must be clearly label
 ### Development Setup
 
 1. Fork the repository
-2. Make your changes to `kindle-manga-downloader.js`
+2. Make your changes to `kandle-downloader.js`
 3. Test thoroughly with debug mode first
 4. Submit a pull request with a clear description
 
@@ -196,10 +191,9 @@ AI assisted and developed contributions are okay, but they must be clearly label
 ### Future Plans
 
 - Extend chapter support.
-- Fix the stupid compact/extract process for CBZ/EPUB.
 - Option to create reader compatible formats instead of a ZIP archive.
 - KFX/KPF Format - I don't know much about this, but it might be useful for Kindle users.
-- Full book support instead of just manga images. (Rename project to Kindle-Web-Downloader?  Kindle-Karamel-Downloader?)
+- Full book support instead of just manga images.
 
 ## License
 
