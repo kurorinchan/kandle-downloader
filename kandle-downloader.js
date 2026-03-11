@@ -1241,7 +1241,7 @@
 		if (archiveFormat === "cbz") {
 			try {
 				log.info("Starting CBZ conversion...");
-				zip = await generateCBZ(zip, imageMetadata);
+				await generateCBZ(zip, imageMetadata);
 				log.okay("CBZ conversion completed successfully");
 			} catch (cbzError) {
 				log.error("CBZ conversion failed, falling back to ZIP:", cbzError);
@@ -1250,7 +1250,7 @@
 		} else if (archiveFormat === "epub") {
 			try {
 				log.info("Starting EPUB conversion...");
-				zip = await generateEPUB(zip, imageMetadata);
+				await generateEPUB(zip, imageMetadata);
 				log.okay("EPUB conversion completed successfully");
 				archiveType = "ZIP";
 			} catch (epubError) {
@@ -1506,7 +1506,8 @@
 	 *
 	 * @param {JSZip} sourceZip The source ZIP containing sequentially named images.
 	 * @param {Array} imageMetadata Array of image metadata objects.
-	 * @returns {Promise<JSZip>} The source ZIP with ComicInfo.xml added.
+	 * @returns {void}
+	 * @throws Will throw an error if CBZ generation fails.
 	 */
 	async function generateCBZ(sourceZip, imageMetadata) {
 		try {
@@ -1526,7 +1527,6 @@
 			}
 
 			log.okay("CBZ: Format ready");
-			return sourceZip;
 		} catch (error) {
 			log.error("CBZ: Generation failed:", error);
 			progressModal.addStatus(`❌ CBZ generation failed: ${error.message}`, "error");
@@ -1635,7 +1635,8 @@
 	 *
 	 * @param {JSZip} sourceZip The source ZIP with images already in OEBPS/Images/.
 	 * @param {Array} imageMetadata Array of image metadata objects.
-	 * @returns {Promise<JSZip>} The source ZIP with EPUB structure added.
+	 * @returns {void}
+	 * @throws Will throw an error if EPUB generation fails.
 	 */
 	async function generateEPUB(sourceZip, imageMetadata) {
 		try {
@@ -1689,8 +1690,6 @@
 
 			progressModal.addStatus("✅ EPUB structure complete", "success");
 			log.okay("EPUB: Format ready");
-
-			return sourceZip;
 		} catch (error) {
 			log.error("EPUB: Generation failed:", error);
 			progressModal.addStatus(`❌ EPUB generation failed: ${error.message}`, "error");
@@ -1875,7 +1874,9 @@
 		 * @returns {string} The escaped string.
 		 */
 		function escapeXML(str) {
-			if (!str) return "";
+			if (!str) {
+				return "";
+			}
 			return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 		}
 
@@ -1908,7 +1909,7 @@
 
 				if (chapter.tocPositionId !== undefined) {
 					//Find the image whose pageIndex matches the chapter's starting position
-					const matchingImageIndex = imageFiles.findIndex((img) => img.pageIndex === chapter.tocPositionId);
+					const matchingImageIndex = imageFiles.findIndex((img) => img.originalPageIndex === chapter.tocPositionId);
 					if (matchingImageIndex !== -1) {
 						pageNum = matchingImageIndex + 1; //1-based page number
 					}
