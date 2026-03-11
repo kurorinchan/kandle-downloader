@@ -1015,7 +1015,9 @@
 				cdnResources: Array.from(allCdnResources.values()),
 			};
 
-			await downloadImages(mergedManifest, allPageData, bookInfo.karamelToken, selectedFormat);
+			//Get the image data from the page data to pass to the download images function.
+			const imageMap = extractPageData(allPageData, mergedManifest);
+			await downloadImages(imageMap, bookInfo.karamelToken, selectedFormat);
 		} catch (error) {
 			if (progressModal) progressModal.close();
 			log.error("Download failed:", error);
@@ -1093,82 +1095,19 @@
 	 * This function extracts image references from the page data, maps them to CDN URLs using the manifest,
 	 * and downloads each image while updating the progress modal.
 	 *
-	 * @param {Object} manifest The manifest containing CDN resources and authentication info.
-	 * @param {Array} pageData The array of page data objects.
+	 * @param {Map} imageMap A Map of elementId to image reference data extracted from page data.
 	 * @param {Object} karamelToken The Karamel token for authentication.
 	 * @param {string} archiveFormat The output format ('zip', 'cbz', or 'epub').
 	 * @returns {Promise<void>}
 	 */
-	async function downloadImages(manifest, pageData, karamelToken, archiveFormat = "zip") {
-		const { baseUrl, authParameter } = manifest.cdn;
-		const resourceMap = {};
-
-		if (!manifest || !manifest.cdnResources || !manifest.cdn) {
-			log.error("Invalid manifest data");
-			return;
-		}
-
+	async function downloadImages(imageMap, karamelToken, archiveFormat = "zip") {
 		if (archiveFormat !== "zip" && archiveFormat !== "cbz" && archiveFormat !== "epub") {
 			log.error("Unsupported archive format:", archiveFormat);
 			return;
 		}
 
-		//Create a map of resource references to URLs
-		manifest.cdnResources.forEach((resource) => {
-			resourceMap[resource.url] = {
-				url: `${baseUrl}/${resource.url}`,
-				type: resource.type,
-			};
-		});
-
-		log.info("Resource Map:", resourceMap);
-
 		//Use script-scoped RTL and cover position values set in downloadBook
 		log.info(`Reading direction: ${bookIsRTL ? "RTL" : "LTR"}, Cover position: ${bookCoverPosition}`);
-
-		//Extract image references and infer spread metadata from page data
-		//Use a Map to deduplicate images by elementId (same image may appear on multiple pages)
-		const imageMap = new Map();
-		pageData.forEach((page) => {
-			if (page.children) {
-				page.children.forEach((child) => {
-					if (child.imageReference && child.elementId) {
-						//Skip if we've already seen this image
-						if (imageMap.has(child.elementId)) {
-							return;
-						}
-
-						const resource = resourceMap[child.imageReference];
-						if (resource) {
-							//Build full URL with auth parameters from manifest and karamel token.
-							let imageUrl = `${resource.url}?${authParameter}`;
-
-							//Add token and expiration from karamelToken.
-							if (karamelToken && karamelToken.token) {
-								imageUrl += `&token=${encodeURIComponent(karamelToken.token)}`;
-							}
-							if (karamelToken && karamelToken.expiresAt) {
-								imageUrl += `&expiration=${karamelToken.expiresAt}`;
-							}
-
-							//Infer page spread metadata for EPUB generation
-							//Since Kindle API doesn't provide explicit spread properties,
-							//we infer them based on page position and reading direction.
-							const spreadInfo = inferSpreadInfo(page.pageIndex);
-
-							//Store unique image by elementId
-							imageMap.set(child.elementId, {
-								pageIndex: page.pageIndex,
-								url: imageUrl,
-								elementId: child.elementId,
-								resourceType: resource.type,
-								spreadInfo: spreadInfo,
-							});
-						}
-					}
-				});
-			}
-		});
 
 		//Convert Map to array and sort by pageIndex to maintain correct order.
 		const imageUrls = Array.from(imageMap.values()).sort((a, b) => a.pageIndex - b.pageIndex);
@@ -1364,6 +1303,77 @@
 			showModal("❌ ZIP Generation Failed", `Error: ${zipError.message}`, [{ text: "OK", type: "primary" }]);
 			throw zipError;
 		}
+	}
+
+	/**
+	 * Extract data from the page including images and text data.
+	 *
+	 * @param {Array} pageData The array of page data objects to extract information from.
+	 * @param {Object} manifest The manifest containing CDN resource information for mapping image references to URLs.
+	 * @returns {Map} A Map of elementId to image data including page index, URL, resource type, and spread info.
+	 */
+	function extractPageData(pageData, manifest) {
+		if (!manifest || !manifest.cdnResources || !manifest.cdn) {
+			log.error("Invalid manifest data");
+			return;
+		}
+
+		const bookInfo = getBookInfo();
+		const imageMap = new Map();
+		const { baseUrl, authParameter } = manifest.cdn;
+		const resourceMap = {};
+
+		//Create a map of resource references to URL CDN locations.
+		manifest.cdnResources.forEach((resource) => {
+			resourceMap[resource.url] = {
+				url: `${baseUrl}/${resource.url}`,
+				type: resource.type,
+			};
+		});
+
+		log.info("Resource Map:", resourceMap);
+
+		pageData.forEach((page) => {
+			if (page.children) {
+				page.children.forEach((child) => {
+					if (child.imageReference && child.elementId) {
+						//Skip if we've already seen this image
+						if (imageMap.has(child.elementId)) {
+							return;
+						}
+
+						const resource = resourceMap[child.imageReference];
+						if (resource) {
+							//Build full URL with auth parameters from manifest and karamel token.
+							let imageUrl = `${resource.url}?${authParameter}`;
+
+							//Add token and expiration from karamelToken.
+							if (bookInfo.karamelToken && bookInfo.karamelToken.token) {
+								imageUrl += `&token=${encodeURIComponent(bookInfo.karamelToken.token)}`;
+							}
+							if (bookInfo.karamelToken && bookInfo.karamelToken.expiresAt) {
+								imageUrl += `&expiration=${bookInfo.karamelToken.expiresAt}`;
+							}
+
+							//Infer page spread metadata for EPUB generation
+							//Since Kindle API doesn't provide explicit spread properties,
+							//we infer them based on page position and reading direction.
+							const spreadInfo = inferSpreadInfo(page.pageIndex);
+
+							//Store unique image by elementId
+							imageMap.set(child.elementId, {
+								pageIndex: page.pageIndex,
+								url: imageUrl,
+								elementId: child.elementId,
+								resourceType: resource.type,
+								spreadInfo: spreadInfo,
+							});
+						}
+					}
+				});
+			}
+		});
+		return imageMap;
 	}
 
 	/**
