@@ -1101,6 +1101,7 @@
 	 * @returns {Promise<void>}
 	 */
 	async function downloadImages(imageMap, karamelToken, archiveFormat = "zip") {
+		//TODO: What a mess.  I'm working on refactoring this.
 		if (archiveFormat !== "zip" && archiveFormat !== "cbz" && archiveFormat !== "epub") {
 			log.error("Unsupported archive format:", archiveFormat);
 			return;
@@ -1229,16 +1230,14 @@
 		}
 
 		//Generate and download ZIP/CBZ/EPUB
-		let finalZip = zip;
-
-		const fileCount = Object.keys(finalZip.files).length;
+		const fileCount = Object.keys(zip.files).length;
 		let archiveType = archiveFormat.toUpperCase();
 
 		//If CBZ format is selected prepare the data for CBZ formatting with ComicInfo.xml.
 		if (archiveFormat === "cbz") {
 			try {
 				log.info("Starting CBZ conversion...");
-				finalZip = await generateCBZ(finalZip, imageMetadata);
+				zip = await generateCBZ(zip, imageMetadata);
 				log.okay("CBZ conversion completed successfully");
 			} catch (cbzError) {
 				log.error("CBZ conversion failed, falling back to ZIP:", cbzError);
@@ -1247,7 +1246,7 @@
 		} else if (archiveFormat === "epub") {
 			try {
 				log.info("Starting EPUB conversion...");
-				finalZip = await generateEPUB(finalZip, imageMetadata);
+				zip = await generateEPUB(zip, imageMetadata);
 				log.okay("EPUB conversion completed successfully");
 				archiveType = "ZIP";
 			} catch (epubError) {
@@ -1261,7 +1260,7 @@
 		log.info(`Creating ${archiveType} file with ${fileCount} files...`);
 
 		try {
-			const zipBlob = await finalZip.generateAsync(
+			const zipBlob = await zip.generateAsync(
 				{
 					type: "blob",
 					compression: "STORE",
@@ -1584,12 +1583,11 @@
 		//Publisher and source information
 		//TODO: Hard coded for now, lets try to fix this in the future.
 		xml += `  <Publisher>Amazon Kindle</Publisher>\n`;
-		xml += `  <Notes>Downloaded from Amazon Kindle. Downloaded with Kindle Manga Downloader.</Notes>\n`;
+		xml += `  <Notes>Downloaded from Amazon Kindle Web Reader by Kindle Manga Downloader.</Notes>\n`;
 
 		//Add ASIN if available
 		if (bookMetadata.asin) {
-			//TODO: Fix domain selection.
-			xml += `  <Web>https://www.amazon.com/dp/${escapeXML(bookMetadata.asin)}</Web>\n`;
+			xml += `  <Web>https://${getAmazonStoreDomain()}/dp/${escapeXML(bookMetadata.asin)}</Web>\n`;
 		}
 
 		//Optional: Add series information if we can extract it from TOC or metadata
@@ -2187,6 +2185,16 @@ img {
 			return "read.amazon.co.jp";
 		} else if (hostname === "read.amazon.com") {
 			return "read.amazon.com";
+		}
+		return null;
+	}
+
+	function getAmazonStoreDomain() {
+		const currentDomain = etCurrentDomain();
+		if (currentDomain == "read.amazon.co.jp") {
+			return "www.amazon.co.jp";
+		} else if (currentDomain === "read.amazon.com") {
+			return "www.amazon.com";
 		}
 		return null;
 	}
