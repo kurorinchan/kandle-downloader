@@ -1,9 +1,13 @@
 //==UserScript==
-// @name         Kindle Manga Downloader
-// @namespace    http://tampermonkey.net/
+// @name         Kandle Downloader
+// @namespace    https://github.com/Alexia/kandle-downloader
+// @homepageURL  https://github.com/Alexia/kandle-downloader
+// @supportURL   https://github.com/Alexia/kandle-downloader/issues
+// @updateURL    https://github.com/Alexia/kandle-downloader/releases/latest/download/kandle-downloader.js
+// @downloadURL  https://github.com/Alexia/kandle-downloader/releases/latest/download/kandle-downloader.js
 // @version      0.1.0
-// @description  Download manga images from Amazon Kindle
-// @author       You
+// @description  Download books and manga from Amazon Kindle
+// @author       Azxiana
 // @match        https://read.amazon.co.jp/*
 // @match        https://read.amazon.com/*
 // @require      https://cdn.jsdelivr.net/npm/js-untar@2.0.0/build/dist/untar.min.js
