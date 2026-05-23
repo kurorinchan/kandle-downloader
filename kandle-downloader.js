@@ -1,4 +1,4 @@
-//==UserScript==
+// ==UserScript==
 // @name         Kandle Downloader
 // @namespace    https://github.com/Alexia/kandle-downloader
 // @homepageURL  https://github.com/Alexia/kandle-downloader
@@ -16,7 +16,7 @@
 // @grant        GM_xmlhttpRequest
 // @connect      cloudfront.net
 // @run-at       document-end
-//==/UserScript==
+// ==/UserScript==
 
 (function () {
 	"use strict";
@@ -1157,7 +1157,7 @@
 
 		//Download each image.
 		for (let i = 0; i < maxImages; i++) {
-			const { pageIndex, url, elementId, resourceType, spreadInfo } = imageUrls[i];
+			const { pageIndex, url, elementId, resourceType, spreadInfo, pageStartPosition, pageEndPosition } = imageUrls[i];
 
 			try {
 				const imgResponse = await fetch(url, {
@@ -1226,6 +1226,8 @@
 					extension: imageFormat,
 					originalPageIndex: pageIndex,
 					spreadInfo: sequentialSpreadInfo,
+					pageStartPosition: pageStartPosition,
+					pageEndPosition: pageEndPosition,
 				});
 				progressModal.updateProgress("🖼️  Downloading Images", i + 1, maxImages, (i + 1) % 10 === 0 ? `✅ ${filename} (${(finalData.byteLength / 1024).toFixed(1)} KB)` : null);
 
@@ -1373,6 +1375,11 @@
 								elementId: child.elementId,
 								resourceType: resource.type,
 								spreadInfo: spreadInfo,
+								// Because "page" usually contains 2 images
+								// this [start, end] range could also contain 2 (or more) images.
+								// See nav and toc.ncx generation functions on why this matters.
+								pageStartPosition: page.startPositionId,
+								pageEndPosition: page.endPositionId,
 							});
 						}
 					}
@@ -1864,25 +1871,158 @@
 	}
 
 	/**
+	 * Helper function to get the image index for a position.
+	 * 
+	 * @param {Array} imageMetadata Array of image metadata objects.
+	 * @param {number} position The position to get the image index for.
+	 * @returns {number} The image index for imageMetadata at position, or -1 if not found.
+	 */
+	function getImageIndexFromPosition(imageMetadata, position) {
+		const NOT_FOUND = -1;
+
+		// An image metadata is associated to a "page" which often contains 2 images.
+		// A (fetched) "page" info contains [start, end] range, but does not explicitly specify
+		// the range for each image.
+		// So we have to infer which image within a page, matches the chapter start position.
+		// This is done by collecting all images' page ranges where a chapter start falls in.
+		// And identify which image is closest to the chapter start position.
+		//
+		// Example1:
+		// chapter start position: 8
+		// image1: [8, 10]
+		// image2: [8, 10]
+		// return image1
+		//
+		// Example2:
+		// chapter start position: 22
+		// image1: [20, 24]
+		// image2: [20, 24]
+		// image3: [20, 24]
+		// return image2
+
+		// A very special case where the last image meets all of the following conditions:
+		// 1. Referenced by TOC (e.g. 奥付 for Japanese manga).
+		// 2. Is a single image "page" (most pages have 2 images).
+		// When these conditions are met, the chapter position falls between the last two images.
+		// 
+		// A real example from a book:
+		// 奥付 Chapter start = 1151 but the last two pages' ranges are
+		// [1146, 1149] and [1152, 1152].
+		// 1151 does not fall in these ranges.
+		// Make it reference the last image.
+		if (imageMetadata.length >= 2) {
+			const lastMetadata = imageMetadata[imageMetadata.length - 1];
+			const secondLastMetadata = imageMetadata[imageMetadata.length - 2];
+
+			if (secondLastMetadata.pageEndPosition < position && position < lastMetadata.pageStartPosition) {
+				log.info(`EPUB: Last image is referenced by TOC (${position}), but is between ` +
+					`two images ${secondLastMetadata.pageEndPosition} and ` +
+					`${lastMetadata.pageStartPosition}. Using last image.`);
+				return imageMetadata.length - 1;
+			}
+		}
+
+		const matchingIndexes = imageMetadata.map((metadata, index) => {
+			if (metadata.pageStartPosition <= position && position <= metadata.pageEndPosition) {
+				return index;
+			}
+			return NOT_FOUND;
+		}).filter((index) => index !== NOT_FOUND);
+
+		if (matchingIndexes.length == 0) {
+			return NOT_FOUND;
+		}
+		if (matchingIndexes.length == 1) {
+			return matchingIndexes[0];
+		}
+
+		// Assume all entries share [start, end] range.
+		const rangeStart = imageMetadata[matchingIndexes[0]].pageStartPosition;
+		const rangeEnd = imageMetadata[matchingIndexes[0]].pageEndPosition;
+
+		// Because the end position is inclusive, it's a special case but easy case.
+		// Just return the last image.
+		if (position === rangeEnd) {
+			return matchingIndexes[matchingIndexes.length - 1];
+		}
+		if (position === rangeStart) {
+			return matchingIndexes[0];
+		}
+
+		// The rest splits the range evenly.
+		// This is probably a very rare case.
+		const range = rangeEnd - rangeStart;
+		const singleImageRange = range / matchingIndexes.length;
+		for (let i = 0; i < matchingIndexes.length; i++) {
+			const start = rangeStart + i * singleImageRange;
+			const end = start + singleImageRange;
+			// Only the last image is inclusive on the end, and is handled above.
+			if (start <= position && position < end) {
+				return matchingIndexes[i];
+			}
+		}
+
+		return NOT_FOUND;
+	}
+
+
+
+	/**
+	 * Helper function to generate chapter entries for EPUB.
+	 * 
+	 * @param {Array} tableOfContents Array of objects containing chapter info.
+	 * @param {Array} imageMetadata  Array of image metadata objects.
+	 * @param {function(number, string, string):string} chapterEntryGenerator
+	 *     Function to generate chapter entry. For example a <navPoint> entry for NAV file for EPUB.
+	 *     The first parameter is the chapter number, the second is the chapter
+	 *     title, and the third is the name of the file where the chapter starts.
+	 * @returns {string} Generated chapter entries
+	 */
+	function generateChapterEntries(tableOfContents, imageMetadata, chapterEntryGenerator) {
+		// JS uses 0-indexed arrays, books use 1-indexed array (pages).
+		const BASE_1_OFFSET = 1;
+		const PAGE_NAME_ZERO_PADDING = 3;
+		let chapterEntries = "";
+		tableOfContents.forEach((chapter, index) => {
+			const playOrder = index + BASE_1_OFFSET;
+			const chapterTitle = escapeXML(chapter.label || chapter.title || `Chapter ${playOrder}`);
+
+			//Map chapter position to actual page number
+			let pageNum = playOrder; //Fallback: use sequential numbering
+			if (chapter.tocPositionId !== undefined) {
+				const index = getImageIndexFromPosition(imageMetadata, chapter.tocPositionId);
+				if (index !== -1) {
+					pageNum = index + BASE_1_OFFSET;
+				}
+			}
+
+			const pageFile = `page${String(pageNum).padStart(PAGE_NAME_ZERO_PADDING, "0")}.xhtml`;
+			chapterEntries += chapterEntryGenerator(playOrder, chapterTitle, pageFile);
+		});
+
+		return chapterEntries;
+	}
+
+	/**
+	 * Escape XML special characters.
+	 * @param {string} str The string to escape.
+	 * @returns {string} The escaped string.
+	 */
+	function escapeXML(str) {
+		if (!str) {
+			return "";
+		}
+		return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+	}
+
+	/**
 	 * Generate nav.xhtml for EPUB format.
 	 * This is the navigation document required by EPUB 3 specification.
 	 *
-	 * @param {Array} imageFiles Array of image file objects.
+	 * @param {Array} imageMetadata Array of image file objects.
 	 * @returns {string} The nav.xhtml content.
 	 */
-	function generateNavXHTML(imageFiles) {
-		/**
-		 * Escape XML special characters.
-		 * @param {string} str The string to escape.
-		 * @returns {string} The escaped string.
-		 */
-		function escapeXML(str) {
-			if (!str) {
-				return "";
-			}
-			return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-		}
-
+	function generateNavXHTML(imageMetadata) {
 		const title = escapeXML(bookMetadata.bookTitle || "Unknown Title");
 
 		let nav = `<?xml version="1.0" encoding="UTF-8"?>
@@ -1901,27 +2041,15 @@
 		if (!bookToc || bookToc.length === 0) {
 			nav += `
 			<li><a href="Text/page001.xhtml">Start</a></li>`;
+			return;
 		} else {
-			//Add chapter entries if TOC is available
-			bookToc.forEach((chapter, index) => {
-				const playOrder = index + 1;
-				const chapterTitle = escapeXML(chapter.label || chapter.title || `Chapter ${playOrder}`);
 
-				//Map chapter position to actual page number
-				let pageNum = playOrder; //Fallback: use sequential numbering
-
-				if (chapter.tocPositionId !== undefined) {
-					//Find the image whose pageIndex matches the chapter's starting position
-					const matchingImageIndex = imageFiles.findIndex((img) => img.originalPageIndex === chapter.tocPositionId);
-					if (matchingImageIndex !== -1) {
-						pageNum = matchingImageIndex + 1; //1-based page number
-					}
-				}
-
-				const pageFile = `page${String(pageNum).padStart(3, "0")}.xhtml`;
-				nav += `
+			function chapterEntryGenerator(playOrder, chapterTitle, pageFile) {
+				return `
 			<li><a href="Text/${pageFile}">${chapterTitle}</a></li>`;
-			});
+			}
+
+			nav += generateChapterEntries(bookToc, imageMetadata, chapterEntryGenerator);
 		}
 
 		nav += `
@@ -1937,20 +2065,10 @@
 	 * Generate toc.ncx for EPUB format.
 	 * This is the navigation document for EPUB 2.0 compatibility.
 	 *
-	 * @param {Array} imageFiles Array of image file objects.
+	 * @param {Array} imageMetadata Array of image file objects.
 	 * @returns {string} The toc.ncx content.
 	 */
-	function generateTocNCX(imageFiles) {
-		/**
-		 * Escape XML special characters.
-		 * @param {string} str The string to escape.
-		 * @returns {string} The escaped string.
-		 */
-		function escapeXML(str) {
-			if (!str) return "";
-			return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-		}
-
+	function generateTocNCX(imageMetadata) {
 		const title = escapeXML(bookMetadata.bookTitle || "Unknown Title");
 		const identifier = bookMetadata.asin || `uuid-${Date.now()}`;
 
@@ -1977,32 +2095,17 @@
 			<content src="Text/page001.xhtml"/>
 		</navPoint>`;
 		} else {
-			//Add chapter entries if TOC is available
-			bookToc.forEach((chapter, index) => {
-				const playOrder = index + 1;
-				const chapterTitle = escapeXML(chapter.label || chapter.title || `Chapter ${playOrder}`);
-
-				//Map chapter position to actual page number
-				let pageNum = playOrder; //Fallback: use sequential numbering
-
-				if (chapter.tocPositionId !== undefined) {
-					//Find the image whose pageIndex matches the chapter's starting position
-					//imageFiles is sorted by pageIndex and contains the original pageIndex values
-					const matchingImageIndex = imageFiles.findIndex((img) => img.pageIndex === chapter.tocPositionId);
-					if (matchingImageIndex !== -1) {
-						pageNum = matchingImageIndex + 1; //1-based page number
-					}
-				}
-
-				const pageFile = `page${String(pageNum).padStart(3, "0")}.xhtml`;
-				ncx += `
+			function chapterEntryGenerator(playOrder, chapterTitle, pageFile) {
+				return `
 		<navPoint id="navpoint-${playOrder}" playOrder="${playOrder}">
 			<navLabel>
 				<text>${chapterTitle}</text>
 			</navLabel>
 			<content src="Text/${pageFile}"/>
 		</navPoint>`;
-			});
+			}
+
+			ncx += generateChapterEntries(bookToc, imageMetadata, chapterEntryGenerator);
 		}
 
 		ncx += `
