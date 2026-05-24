@@ -25,6 +25,8 @@
 	const DEBUG_MODE = false; //Set to false for full download
 	const DEBUG_MAX_PAGE_REQUESTS = 3; //Only download first N page requests (each request = 2 pages)
 	const DEBUG_MAX_IMAGES = 10; //Only download first N images
+	// Download the last DEBUG_MAX_PAGE_REQUESTS pages (instead of first).
+	const DEBUG_DOWNLOAD_LAST_PAGES = false;
 	//====================================
 
 	/**
@@ -958,8 +960,9 @@
 			//Download remaining pages using location map positions
 			let requestCount = 1;
 			const maxRequests = DEBUG_MODE ? DEBUG_MAX_PAGE_REQUESTS : totalLocations;
+			const downloadStartPage = DEBUG_MODE && DEBUG_DOWNLOAD_LAST_PAGES ? totalLocations - DEBUG_MAX_PAGE_REQUESTS : 2;
 
-			for (let posIndex = 2; posIndex < totalLocations; posIndex += pagesPerRequest) {
+			for (let posIndex = downloadStartPage; posIndex < totalLocations; posIndex += pagesPerRequest) {
 				if (DEBUG_MODE && requestCount >= maxRequests) {
 					progressModal.addStatus(`🐛 DEBUG MODE: Stopping after ${requestCount} requests`, "warning");
 					log.warning(`DEBUG MODE: Stopping after ${requestCount} requests`);
