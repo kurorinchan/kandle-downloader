@@ -11,7 +11,7 @@
 // @match        https://read.amazon.co.jp/*
 // @match        https://read.amazon.com/*
 // @require      https://cdn.jsdelivr.net/npm/js-untar@2.0.0/build/dist/untar.min.js
-// @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.9.1/jszip.min.js
+// @require      https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js
 // @grant        GM_download
 // @grant        GM_xmlhttpRequest
 // @connect      cloudfront.net
@@ -1143,7 +1143,17 @@
 			log.info(`Found spread metadata for ${Object.keys(pageSpreadMetadata).length} pages`);
 		}
 
-		const zip = new JSZip();
+		// fflate works with a flat file map: { "path": Uint8Array }
+		// We accumulate entries here and zip them in one shot at the end.
+		const zipFiles = {};
+		// Helper: accepts ArrayBuffer, Uint8Array, or string and inserts into zipFiles.
+		const addToZip = (path, data) => {
+			if (typeof data === "string") {
+				zipFiles[path] = fflate.strToU8(data);
+			} else {
+				zipFiles[path] = data instanceof Uint8Array ? data : new Uint8Array(data);
+			}
+		};
 		const bookTitle = bookMetadata?.bookTitle || "manga";
 
 		//Track image metadata for EPUB generation.
@@ -1216,7 +1226,7 @@
 				//For EPUB, store images in OEBPS/Images/ subfolder from the start.
 				//For ZIP/CBZ, store at root level.
 				const storagePath = archiveFormat === "epub" ? `OEBPS/Images/${filename}` : filename;
-				zip.file(storagePath, finalData);
+				addToZip(storagePath, finalData);
 
 				//Track metadata for EPUB generation (need extension and spread info)
 				//Recalculate spread info based on sequential index, not original sparse pageIndex.
@@ -1239,14 +1249,14 @@
 		}
 
 		//Generate and download ZIP/CBZ/EPUB
-		const fileCount = Object.keys(zip.files).length;
+		const fileCount = Object.keys(zipFiles).length;
 		let archiveType = archiveFormat.toUpperCase();
 
 		//If CBZ format is selected prepare the data for CBZ formatting with ComicInfo.xml.
 		if (archiveFormat === "cbz") {
 			try {
 				log.info("Starting CBZ conversion...");
-				await generateCBZ(zip, imageMetadata);
+				await generateCBZ(zipFiles, addToZip, imageMetadata);
 				log.okay("CBZ conversion completed successfully");
 			} catch (cbzError) {
 				log.error("CBZ conversion failed, falling back to ZIP:", cbzError);
@@ -1255,7 +1265,7 @@
 		} else if (archiveFormat === "epub") {
 			try {
 				log.info("Starting EPUB conversion...");
-				await generateEPUB(zip, imageMetadata);
+				await generateEPUB(zipFiles, addToZip, imageMetadata);
 				log.okay("EPUB conversion completed successfully");
 				archiveType = "ZIP";
 			} catch (epubError) {
@@ -1269,19 +1279,24 @@
 		log.info(`Creating ${archiveType} file with ${fileCount} files...`);
 
 		try {
-			const zipBlob = await zip.generateAsync(
-				{
-					type: "blob",
-					compression: "STORE",
-				},
-				(zipMetadata) => {
-					const percent = zipMetadata.percent.toFixed(1);
-					if (zipMetadata.percent % 10 < 1) {
-						progressModal.updateProgress("📦 Creating Archive", Math.round(zipMetadata.percent), 100, `Processing: ${zipMetadata.currentFile || "finalizing"}`);
+			// fflate.zip is async (non-blocking); use it so the UI stays responsive
+			// while the archive is assembled.  level 0 = STORE (no compression),
+			// matching the original behaviour and ideal for pre-compressed image data.
+			const zipUint8 = await new Promise((resolve, reject) => {
+				const opts = {};
+				for (const path of Object.keys(zipFiles)) {
+					opts[path] = { level: 0 };
+				}
+				fflate.zip(zipFiles, opts, (err, data) => {
+					if (err) {
+						reject(err);
+					} else {
+						resolve(data);
 					}
-					log.info(`ZIP progress: ${percent}% - ${zipMetadata.currentFile || "processing"}`);
-				},
-			);
+				});
+			});
+			progressModal.updateProgress("📦 Creating Archive", 100, 100, "Finalizing...");
+			const zipBlob = new Blob([zipUint8], { type: "application/zip" });
 
 			progressModal.addStatus(`✅ ${archiveType} created: ${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`, "success");
 			log.okay(`${archiveType} file created: ${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`);
@@ -1514,12 +1529,13 @@
 	 * Images are already sequentially named and in the correct location during download,
 	 * so we just add ComicInfo.xml to the existing ZIP.
 	 *
-	 * @param {JSZip} sourceZip The source ZIP containing sequentially named images.
+	 * @param {Object} zipFiles  The flat fflate file map { path: Uint8Array } being assembled.
+	 * @param {Function} addToZip  Helper to normalise and insert a file into zipFiles.
 	 * @param {Array} imageMetadata Array of image metadata objects.
 	 * @returns {void}
 	 * @throws Will throw an error if CBZ generation fails.
 	 */
-	async function generateCBZ(sourceZip, imageMetadata) {
+	async function generateCBZ(zipFiles, addToZip, imageMetadata) {
 		try {
 			log.info("Generating CBZ format...");
 			progressModal.addStatus("📚 Converting to CBZ format...", "info");
@@ -1527,7 +1543,7 @@
 			//Images are already correctly named and positioned, just add ComicInfo.xml
 			try {
 				const comicInfoXML = generateComicInfoXML(imageMetadata.length);
-				sourceZip.file("ComicInfo.xml", comicInfoXML);
+				addToZip("ComicInfo.xml", comicInfoXML);
 				log.okay(`CBZ: ComicInfo.xml generated (${comicInfoXML.length} bytes)`);
 				progressModal.addStatus("✅ Added ComicInfo.xml metadata", "success");
 			} catch (xmlError) {
@@ -1643,12 +1659,13 @@
 	 * Images are already in OEBPS/Images/ from download step, so we just add
 	 * the EPUB metadata and structure files.
 	 *
-	 * @param {JSZip} sourceZip The source ZIP with images already in OEBPS/Images/.
+	 * @param {Object} zipFiles  The flat fflate file map { path: Uint8Array } being assembled.
+	 * @param {Function} addToZip  Helper to normalise and insert a file into zipFiles.
 	 * @param {Array} imageMetadata Array of image metadata objects.
 	 * @returns {void}
 	 * @throws Will throw an error if EPUB generation fails.
 	 */
-	async function generateEPUB(sourceZip, imageMetadata) {
+	async function generateEPUB(zipFiles, addToZip, imageMetadata) {
 		try {
 			log.info("Generating EPUB format...");
 			progressModal.addStatus("📖 Converting to EPUB format...", "info");
@@ -1661,11 +1678,14 @@
 			progressModal.addStatus(`📄 Processing ${imageMetadata.length} images...`, "info");
 
 			//Step 1: Add mimetype file (MUST be first, MUST be uncompressed)
-			sourceZip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+			// EPUB spec requires mimetype to be the first entry and uncompressed.
+			// fflate.zip preserves insertion order, so adding it first satisfies that.
+			// All files already use level 0 (STORE), so no extra flag is needed.
+			addToZip("mimetype", "application/epub+zip");
 			log.okay("EPUB: Added mimetype");
 
 			//Step 2: Add META-INF/container.xml
-			sourceZip.file("META-INF/container.xml", generateContainerXML());
+			addToZip("META-INF/container.xml", generateContainerXML());
 			log.okay("EPUB: Added container.xml");
 
 			//Step 3: Generate XHTML pages for each image
@@ -1673,29 +1693,29 @@
 				const pageNum = index + 1;
 				const xhtmlFile = `page${String(pageNum).padStart(3, "0")}.xhtml`;
 				const xhtml = generatePageXHTML(pageNum, img.filename);
-				sourceZip.file(`OEBPS/Text/${xhtmlFile}`, xhtml);
+				addToZip(`OEBPS/Text/${xhtmlFile}`, xhtml);
 			});
 
 			progressModal.addStatus(`✅ Generated ${imageMetadata.length} XHTML pages`, "success");
 			log.okay(`EPUB: Generated ${imageMetadata.length} XHTML pages`);
 
 			//Step 4: Add CSS stylesheet
-			sourceZip.file("OEBPS/Styles/style.css", generateEPUBCSS());
+			addToZip("OEBPS/Styles/style.css", generateEPUBCSS());
 			log.okay("EPUB: Added stylesheet");
 
 			//Step 5: Generate and add content.opf (use imageMetadata directly)
 			const contentOPF = generateContentOPF(imageMetadata);
-			sourceZip.file("OEBPS/content.opf", contentOPF);
+			addToZip("OEBPS/content.opf", contentOPF);
 			log.okay("EPUB: Added content.opf");
 
 			//Step 6: Generate and add nav.xhtml (EPUB 3 Navigation Document)
 			const navXHTML = generateNavXHTML(imageMetadata);
-			sourceZip.file("OEBPS/nav.xhtml", navXHTML);
+			addToZip("OEBPS/nav.xhtml", navXHTML);
 			log.okay("EPUB: Added nav.xhtml");
 
 			//Step 7: Generate and add toc.ncx (EPUB 2.0 compatibility)
 			const tocNCX = generateTocNCX(imageMetadata);
-			sourceZip.file("OEBPS/toc.ncx", tocNCX);
+			addToZip("OEBPS/toc.ncx", tocNCX);
 			log.okay("EPUB: Added toc.ncx");
 
 			progressModal.addStatus("✅ EPUB structure complete", "success");
