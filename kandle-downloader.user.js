@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Kandle Downloader
-// @namespace    https://github.com/Alexia/kandle-downloader
-// @homepageURL  https://github.com/Alexia/kandle-downloader
-// @supportURL   https://github.com/Alexia/kandle-downloader/issues
-// @updateURL    https://github.com/Alexia/kandle-downloader/releases/latest/download/kandle-downloader.js
-// @downloadURL  https://github.com/Alexia/kandle-downloader/releases/latest/download/kandle-downloader.js
-// @version      0.1.0
+// @namespace    https://github.com/kurorinchan/kandle-downloader
+// @homepageURL  https://github.com/kurorinchan/kandle-downloader
+// @supportURL   https://github.com/kurorinchan/kandle-downloader/issues
+// @updateURL    https://raw.githubusercontent.com/kurorinchan/kandle-downloader/refs/heads/master/kandle-downloader.user.js
+// @downloadURL  https://raw.githubusercontent.com/kurorinchan/kandle-downloader/refs/heads/master/kandle-downloader.user.js
+// @version      0.1.1
 // @description  Download books and manga from Amazon Kindle
 // @author       Azxiana
 // @match        https://read.amazon.co.jp/*

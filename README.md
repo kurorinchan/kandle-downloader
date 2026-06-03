@@ -39,7 +39,7 @@ Download your Kindle Books(Manga only for the moment) from your own Amazon Kindl
 	- Follow the installation instructions for your browser.
 
 2. **Install the script**:
-	- Open the [the raw](https://raw.githubusercontent.com/Alexia/kandle-downloader/refs/heads/master/kandle-downloader.js) `kandle-downloader.js` in your browser.
+	- Open the [the raw](https://raw.githubusercontent.com/kurorinchan/kandle-downloader/refs/heads/master/kandle-downloader.user.js) `kandle-downloader.user.js` in your browser.
 	- Your userscript manager should detect it and prompt you to install.
 		- This might not work with some user script extensions and you might have to manually install it.
 	- Click "Install" or "Confirm".
