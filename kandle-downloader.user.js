@@ -1801,12 +1801,43 @@
 		<meta property="rendition:page-progression-direction">rtl</meta>`;
 		}
 
+		// if there are any images, use that as the cover. So declare cover here.
+		if (imageFiles.length > 0) {
+			opf += `
+		<meta name="cover" content="cover"/>`;
+		}
+
 		opf += `
 	</metadata>
 	<manifest>
 		<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
 		<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
 		<item id="style" href="Styles/style.css" media-type="text/css"/>`;
+
+		function determineMediaType(img) {
+			switch (img.extension) {
+				case "png":
+					return "image/png";
+				case "jpg":
+				case "jpeg":
+					return "image/jpeg";
+				case "webp":
+					return "image/webp";
+				case "gif":
+					return "image/gif";
+				default:
+					return "application/octet-stream";
+			}
+		}
+
+		// Always use the first image as the cover.
+		if (imageFiles.length > 0) {
+			const firstImage = imageFiles[0];
+			const mediaType = determineMediaType(firstImage);
+			opf += `
+		<item id="cover" href="Images/${firstImage.filename}" media-type="${mediaType}"/>`;
+		}
+
 
 		//Add all image pages to manifest
 		imageFiles.forEach((img, index) => {
@@ -1818,17 +1849,7 @@
 		//Add all images to manifest
 		imageFiles.forEach((img, index) => {
 			const pageNum = index + 1;
-			//The code formatter is going wild here and it won't stop.
-			const mediaType =
-				img.extension === "png"
-					? "image/png"
-					: img.extension === "jpg" || img.extension === "jpeg"
-						? "image/jpeg"
-						: img.extension === "webp"
-							? "image/webp"
-							: img.extension === "gif"
-								? "image/gif"
-								: "image/png";
+			const mediaType = determineMediaType(img);
 			opf += `
 		<item id="img${pageNum}" href="Images/${img.filename}" media-type="${mediaType}"/>`;
 		});
